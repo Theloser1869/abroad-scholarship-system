@@ -52,7 +52,7 @@ No real secret appears anywhere in this repository. `.env` is git-ignored; `.env
 | `AUTH_LOGIN_MAX_ATTEMPTS` | `5` | `5` | `5` (or your policy) | |
 | `AUTH_LOCKOUT_MINUTES` | `15` | `15` | `15` (or your policy) | |
 | `AUTH_PASSWORD_RESET_TTL_MINUTES` | `30` | `30` | `30` (or your policy) | |
-| `BOOTSTRAP_ADMIN_PASSWORD` | empty (falls back to dev default `ChangeMe!123`) | empty | **required** — a real, unique password | The seed script (`database/seeds/seed.ts`) refuses to run in production without this set; it never falls back to the dev default. |
+| `BOOTSTRAP_ADMIN_PASSWORD` | empty (falls back to dev default `ChangeMe!123`) | empty | **required** — a real, unique password | The seed script (`database/seeds/seed.ts`) refuses to run in production without this set; it never falls back to the dev default. Set in Render and used for the one-time production bootstrap seed — see `docs/DEPLOYMENT_FREE.md` "Bootstrap admin procedure" for the completed record. Re-running the seed later with a different value does NOT reset the existing admin's password (idempotent `update: {}`); rotate the password through a future password-change/reset flow instead of this variable. |
 | `AUTH_MFA_ENCRYPTION_KEY` | the committed example 32-byte hex value | same | freshly generated 32-byte hex (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`) | `assertProductionConfigSafe()` explicitly rejects the committed example value in production, even though it's a syntactically valid key. |
 | `AUTH_MFA_ISSUER` | `"Abroad Scholarship System"` | same | same or your branding | |
 | `AUTH_COOKIE_SECURE` | `false` (plain `http://localhost`) | `false` | unset/`true` (default) | `assertProductionConfigSafe()` rejects `false` in production. |

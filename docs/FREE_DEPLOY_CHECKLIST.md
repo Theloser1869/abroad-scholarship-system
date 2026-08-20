@@ -15,6 +15,20 @@ Prepared: 2026-08-20, updated as each real step actually happened (this file is 
 - [x] **Security validation PASS** — `assertProductionConfigSafe()` extended with storage-provider and CORS-wildcard checks, unit-tested (19/19 in `assert-production-config.spec.ts`); no change to the Phase 13/14 security posture otherwise (RBAC/IDOR/audit/webhook/signed-URL protections all re-verified via the unchanged full e2e suite).
 - [x] **Full regression PASS** — 182/182 unit, 475/475 e2e (up from Phase 14's 174/466 baseline — +8 unit and +9 e2e new tests from this task's changes, zero regressions). Typecheck and lint both clean (0 errors).
 - [x] **Ready to create remaining cloud resources** — GitHub, Supabase, and R2 are now all real and connected (see above). Creating the Render service is the remaining explicit next action, not yet performed.
+- [x] **Render live** — service deployed at `https://abroad-scholarship-system.onrender.com`; `GET /health` and `GET /health/ready` both return 200 against the real database.
+- [x] **Production admin bootstrap PASS** — see "Production admin bootstrap" below.
+
+## Production admin bootstrap (real, against the live Render + Supabase deployment)
+
+- **Demo seed NOT run** — proved from source before running anything: `main()` in `database/seeds/seed.ts` calls `seedRolesAndPermissions` (role/permission matrix, not fixture data) and `seedBootstrapAdmin` (single idempotent upsert on `username: 'admin'`) unconditionally, and `seedRbacFixtures` — the only function that creates demo users or any Student/Case/Task/Lead/StudentContact fixture — only when `NODE_ENV !== 'production'`. Ran with `NODE_ENV=production`, confirmed the log line `NODE_ENV=production — skipping demo users and RBAC test fixtures.`
+- **Pre-existing stray admin removed first**: a read-only query found one `admin` row already present (created earlier the same day by an earlier, unrelated local validation task's throwaway setup — not this deployment's intended credential). Confirmed via read-only query it had zero `audit_logs` rows referencing it and zero sessions (safe to delete without altering audit history), then removed it by exact `username: 'admin'` match before seeding fresh.
+- **Bootstrap admin created**: exactly one `users` row afterward — `username: admin`, role `SYSTEM_ADMIN`, `status: ACTIVE`, `passwordHash` scrypt-hashed (never plaintext, never printed).
+- **No development fixtures created**: `student`, `case`, `task`, `application`, `scholarshipApplication`, `visa`, `enrollment`, `partner`, `lead`, `contract`, `payment`, `document`, `studentContact` all counted **0** via read-only query, both immediately after bootstrap and after the idempotency re-run.
+- **Idempotency PASS**: re-ran the identical seed command a second time — `users` count stayed at exactly 1, `createdAt` and password hash unchanged (the `update: {}` upsert clause), confirming a retry cannot create a duplicate admin or silently reset the password.
+- **Login smoke test PASS**: `POST /auth/login` → 201, correct `roleCode: SYSTEM_ADMIN`, access + refresh tokens issued; `GET /auth/me` → 200 with the same role; `POST /auth/logout` → 200, after which the same access token is immediately rejected (`401 UNAUTHENTICATED`), not just the refresh cookie.
+- **RBAC smoke test PASS**: `GET /users` and `GET /audit-logs` (both granted to `SYSTEM_ADMIN`) → 200; `GET /students`, `GET /documents/:id`, `GET /portal/me` (none granted to `SYSTEM_ADMIN` by design — see `database/seeds/seed.ts` GRANTS) → 403 `PERMISSION_DENIED`; `GET /users` with no token → 401.
+- **Audit PASS**: the authenticated `GET /audit-logs` (VIEW), the denied `GET /documents/:id` (VIEW, `result: DENIED`), and `POST /auth/logout` (LOGOUT) all produced audit rows correctly attributed to the admin's `actorId`. (Login itself audits with a null actor by design — no principal exists yet at that point in the request.)
+- **No password, token, or connection string appears anywhere in this record.**
 
 ## Supabase connection verification (real, against project `xpxvvzwtvmcqkvugzfmd`)
 
