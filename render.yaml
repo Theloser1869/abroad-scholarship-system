@@ -12,11 +12,11 @@
 # environment-variable store from that point on.
 
 services:
-  - name: abroad-scholarship-api # placeholder — rename to your actual Render service name
+  - name: abroad-scholarship-system # placeholder — rename to your actual Render service name
     type: web
     runtime: docker
     plan: free
-    region: oregon # placeholder — pick the region closest to your Supabase project
+    region: Singapore # placeholder — pick the region closest to your Supabase project
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
@@ -38,6 +38,13 @@ services:
         sync: false # Supabase POOLED connection string (PgBouncer, port 6543)
       - key: DIRECT_URL
         sync: false # Supabase DIRECT connection string (port 5432) — used for migrations
+      # Render's free plan has no separate Pre-Deploy Command and is single-instance by
+      # construction, so docker-entrypoint.sh runs `prisma migrate deploy` at container
+      # start (before the app binds) only when this is "true" — see
+      # docs/DEPLOYMENT_FREE.md "Migration procedure" for why this is safe here
+      # specifically. Never set this on a multi-instance deployment target.
+      - key: RUN_MIGRATIONS_ON_BOOT
+        value: "true"
 
       # --- AUTH ---
       - key: AUTH_JWT_SECRET

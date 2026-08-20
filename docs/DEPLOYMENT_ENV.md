@@ -26,17 +26,21 @@ No real secret appears anywhere in this repository. `.env` is git-ignored; `.env
 
 ## DATABASE (Supabase for remote)
 
+**Connected**: Supabase project ref `xpxvvzwtvmcqkvugzfmd` (region: `ap-northeast-2`) is the REMOTE DEMO database target as of this task. Full migration history (20 migrations) has been applied and verified (64 tables, 109 foreign keys, 187 indexes, schema reported up to date by `prisma migrate status`) — see `docs/FREE_DEPLOY_CHECKLIST.md` for the verification record. No password/connection string is recorded here or anywhere else in this repository; both `DATABASE_URL`/`DIRECT_URL` live only in the local, git-ignored `.env` for now (to be moved into Render's environment-variable store, never a file, once Render is configured).
+
 | Variable | LOCAL | TEST | REMOTE DEMO | Notes |
 |---|---|---|---|---|
-| `DATABASE_URL` | local Docker Postgres | same as LOCAL | Supabase **pooled** connection string (PgBouncer, typically port `6543`) | The app's own runtime connection. |
-| `DIRECT_URL` | same value as `DATABASE_URL` (no pooler locally) | same as LOCAL | Supabase **direct** connection string (typically port `5432`) | Prisma's migration engine needs the direct connection for DDL — some operations aren't safe through a transaction pooler. Both must be set (schema.prisma declares `directUrl`; `prisma generate`/`migrate` errors if it's unresolved). |
+| `DATABASE_URL` | local Docker Postgres | same as LOCAL | Supabase **transaction-mode pooler** connection string (port `6543`, `pgbouncer=true&sslmode=require`) | The app's own runtime connection. |
+| `DIRECT_URL` | same value as `DATABASE_URL` (no pooler locally) | same as LOCAL | Supabase **session-mode pooler** connection string (port `5432`, `sslmode=require`) — used as the IPv4-compatible alternative to the true Direct Connection, since this environment has no IPv6 route to Supabase's direct-connection endpoint | Prisma's migration engine needs a non-transaction-pooled connection for DDL. Both must be set (schema.prisma declares `directUrl`; `prisma generate`/`migrate` errors if it's unresolved). `sslmode=require` is explicit on both — verified the connection still succeeds with it enforced (not just relying on the default "prefer" behavior). |
+| `RUN_MIGRATIONS_ON_BOOT` | unset (false) | unset (false) | `"true"` (Render only, no other target) | Read by `docker-entrypoint.sh`, not by the NestJS app itself. Render's free plan has no Pre-Deploy Command and is single-instance by construction, so migrations run at container start, before the app binds, instead of as a separate step — see `docs/DEPLOYMENT_FREE.md` "Migration procedure". Leave unset everywhere else; `docs/production/PRODUCTION_RUNBOOK.md` §3's separate-step guidance still applies whenever this is unset. |
 
-**Supabase setup reference (documented, not performed by this task):**
-1. Create a Supabase project (free tier).
-2. Project Settings → Database → find the "Connection string" section: copy the **Transaction pooler** string (port 6543) for `DATABASE_URL`, and the **Direct connection** string (port 5432) for `DIRECT_URL`.
-3. Set both in Render's environment variables.
-4. Run `prisma migrate deploy` against `DIRECT_URL` as an explicit, separate deployment step (never auto-run on container start — see `docs/production/PRODUCTION_RUNBOOK.md`).
-5. Verify with `prisma migrate status`.
+**Supabase setup reference:**
+1. Create a Supabase project (free tier). — done, project ref `xpxvvzwtvmcqkvugzfmd`.
+2. Project Settings → Database → "Connection string": the **Transaction pooler** string (port 6543) for `DATABASE_URL`, and — since this environment has no IPv6 route — the **Session pooler** string (port 5432) for `DIRECT_URL` (Supabase's own documented IPv4-compatible alternative to the true Direct Connection for exactly this situation).
+3. Percent-encode any reserved characters (`@`, `#`, `%`, `/`, `:`, etc.) inside the password portion of the URI — an unescaped `@` in a password is genuinely ambiguous for a URI parser (it's the same character that separates credentials from host) and was found and fixed during this setup.
+4. Set both in Render's environment variables once Render is configured — not yet done.
+5. Run `prisma migrate deploy` against `DIRECT_URL` as an explicit, separate deployment step (never auto-run on container start — see `docs/production/PRODUCTION_RUNBOOK.md`). — done.
+6. Verify with `prisma migrate status`. — done, schema up to date, zero pending/conflicting migrations.
 
 ## AUTH
 
@@ -55,20 +59,26 @@ No real secret appears anywhere in this repository. `.env` is git-ignored; `.env
 
 ## STORAGE
 
+**Connected**: Cloudflare R2 bucket `abroad-scholarship-documents` (account `d36f5cff4f75a0a34a92710adaf63c8d`) is the REMOTE DEMO storage target as of this task. Validated for real: bucket access, private access (no public URL), upload/scan/download, signed-URL properties, versioning, cross-user IDOR, file-security checks, and audit logging — see `docs/FREE_DEPLOY_CHECKLIST.md` "R2 connection verification" for the full record. No credential is recorded here or anywhere else in this repository; `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` live only in the local, git-ignored `.env` for now (to be moved into Render's environment-variable store, never a file, once Render is configured).
+
 | Variable | LOCAL | TEST | REMOTE DEMO | Notes |
 |---|---|---|---|---|
 | `STORAGE_PROVIDER` | `local` | `local` | `r2` | `assertProductionConfigSafe()` rejects `local`/unset in production — Render's free-tier filesystem is ephemeral. |
 | `DOCUMENT_STORAGE_DIR` | `storage/documents` | `storage/documents` | unused (R2 selected) | Only read by `LocalFilesystemStorageProvider`. |
-| `R2_ACCOUNT_ID` | unused | unused | your Cloudflare account ID | Used to derive the R2 endpoint if `R2_ENDPOINT` isn't set directly. |
-| `R2_ENDPOINT` | for local MinIO validation only: `http://localhost:9000` | same, if running `r2-storage-provider.e2e-spec.ts` | leave unset if using `R2_ACCOUNT_ID`, or set directly | Either this or `R2_ACCOUNT_ID` is required when `STORAGE_PROVIDER=r2`. |
-| `R2_ACCESS_KEY_ID` | MinIO test credential (`minioadmin`) for local validation only | same | your real R2 API token's access key ID | |
-| `R2_SECRET_ACCESS_KEY` | MinIO test credential (`minioadmin123`) for local validation only | same | your real R2 API token's secret | |
-| `R2_BUCKET` | `abroad-documents-test` (MinIO) | same | your real R2 bucket name | |
+| `R2_ACCOUNT_ID` | unused | unused | Cloudflare account ID — set | Used to derive the R2 endpoint. |
+| `R2_ENDPOINT` | for local MinIO validation only: `http://localhost:9000` | same, if running `r2-storage-provider.e2e-spec.ts` | derived endpoint — set | Either this or `R2_ACCOUNT_ID` is required when `STORAGE_PROVIDER=r2`. |
+| `R2_ACCESS_KEY_ID` | MinIO test credential (`minioadmin`) for local validation only | same | real R2 API token access key — set (value never logged/committed) | |
+| `R2_SECRET_ACCESS_KEY` | MinIO test credential (`minioadmin123`) for local validation only | same | real R2 API token secret — set (value never logged/committed) | |
+| `R2_BUCKET` | `abroad-documents-test` (MinIO) | same | `abroad-scholarship-documents` — set | |
 | `DOCUMENT_SIGNING_SECRET` | `dev-only-document-signing-secret-not-for-production-use` | same | freshly generated, unique | Signs short-lived download tokens — independent of which `StorageProvider` is bound. |
 | `DOCUMENT_DOWNLOAD_URL_TTL_SECONDS` | `60` | `60` | `60` (or your policy) | |
 | `DOCUMENT_MAX_SIZE_BYTES` | `26214400` (25MB) | `26214400` | `26214400` (or your policy) | |
 
-**R2 setup reference (documented, not performed by this task):** create an R2 bucket in the Cloudflare dashboard, create an R2 API token scoped to that bucket (Account → R2 → Manage API Tokens), record the Account ID, Access Key ID, Secret Access Key, and bucket name into Render's environment variables. See `docs/DEPLOYMENT_FREE.md` "R2 setup" for the full walkthrough.
+**R2 setup reference:**
+1. Create an R2 bucket in the Cloudflare dashboard. — done, `abroad-scholarship-documents`.
+2. Create an R2 API token scoped to that bucket (Account → R2 → Manage API Tokens). — done.
+3. Record the Account ID, Access Key ID, Secret Access Key, and bucket name into Render's environment variables once Render is configured. — not yet done (values currently live only in local `.env`).
+4. Validate the real bucket end-to-end (connection, upload/download, IDOR, cleanup). — done, see `docs/FREE_DEPLOY_CHECKLIST.md`.
 
 ## EMAIL
 

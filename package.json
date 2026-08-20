@@ -23,11 +23,11 @@
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} database/seeds/seed.ts"
   },
   "devDependencies": {
-    "prisma": "6.19.3",
     "ts-node": "10.9.2",
     "typescript": "5.9.3"
   },
   "dependencies": {
-    "@prisma/client": "6.19.3"
+    "@prisma/client": "6.19.3",
+    "prisma": "6.19.3"
   }
 }

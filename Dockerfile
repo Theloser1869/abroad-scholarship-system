@@ -34,6 +34,8 @@ COPY --from=builder /app/node_modules/@prisma/client /app/node_modules/@prisma/c
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY database/schema.prisma ./database/schema.prisma
 COPY database/migrations ./database/migrations
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 # Non-root — never run the process as root inside the container.
 RUN addgroup -S app && adduser -S app -G app \
@@ -49,7 +51,10 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||3000)+'/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
-# `node` directly as the entrypoint (not `npm start`) — PID 1 receives SIGTERM straight
-# from `docker stop`/the orchestrator, with no shell in between to swallow it. This is what
-# main.ts's `enableShutdownHooks()` + SIGTERM handler actually depends on to run at all.
-CMD ["node", "apps/api/dist/main.js"]
+# docker-entrypoint.sh optionally runs `prisma migrate deploy` (only when
+# RUN_MIGRATIONS_ON_BOOT=true — see that file's comment and docs/DEPLOYMENT_FREE.md
+# "Migration procedure"), then `exec`s straight into `node`, replacing the shell process in
+# place — PID 1 still receives SIGTERM straight from `docker stop`/the orchestrator, with no
+# shell left in between to swallow it, exactly as when `node` was the direct CMD. This is
+# what main.ts's `enableShutdownHooks()` + SIGTERM handler actually depends on to run at all.
+CMD ["./docker-entrypoint.sh"]
