@@ -1,0 +1,6 @@
+# Shell scripts are executed inside Linux containers via their shebang line — a CRLF line
+# ending there (e.g. "#!/bin/sh\r") makes the kernel look for a nonexistent "/bin/sh\r"
+# interpreter and fail with a misleading "not found" error. Force LF on checkout regardless
+# of any given machine's core.autocrlf setting (this repo is developed on Windows, where
+# autocrlf=true silently reintroduces CRLF into the working tree on every checkout).
+*.sh text eol=lf
