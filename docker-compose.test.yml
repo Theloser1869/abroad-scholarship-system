@@ -1,0 +1,30 @@
+name: abroad-scholarship-system-test
+
+# Local-only S3-compatible emulator for validating R2StorageProvider without any real
+# Cloudflare R2 credentials or bucket — MinIO speaks the same S3 API Cloudflare R2 does, so
+# the exact same `@aws-sdk/client-s3`-based provider code runs unmodified against it.
+# Opt-in (`docker compose -f docker-compose.test.yml up -d`), separate from the always-on
+# dev Postgres in docker-compose.yml. See docs/DEPLOYMENT_FREE.md "R2 local validation."
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: abroad-scholarship-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web console (local debugging only)
+    volumes:
+      - abroad_scholarship_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  abroad_scholarship_minio_data:
+    name: abroad_scholarship_minio_data

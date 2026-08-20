@@ -1,0 +1,89 @@
+# Phase 14 production hardening — 14-production/01_PRODUCTION_HARDENING.md "CI/CD".
+#
+# Authored per the phase's deployment-gate requirements (install → lint → typecheck →
+# unit → integration/e2e → build → migration validation → artifact → dependency scan →
+# deployment gate). NOTE: this repository has no git remote/CI platform connected in this
+# environment (confirmed every phase — see docs/phase-status/PHASE_14.md "CI/CD"), so this
+# workflow has never actually executed; it is reviewed/authored, not exercised. Every step
+# it runs (install/lint/typecheck/unit/e2e/build/migrate deploy) has been run manually and
+# confirmed passing throughout Phase 01-14 — this file wires the same commands into a real
+# gate for whenever a git remote/Actions runner exists.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: abroad_app
+          POSTGRES_PASSWORD: abroad_app_dev_password
+          POSTGRES_DB: abroad_scholarship_dev
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U abroad_app -d abroad_scholarship_dev"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://abroad_app:abroad_app_dev_password@localhost:55432/abroad_scholarship_dev?schema=public
+      AUTH_JWT_SECRET: ci-only-jwt-secret-never-used-outside-this-pipeline
+      AUTH_MFA_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000
+      DOCUMENT_SIGNING_SECRET: ci-only-document-signing-secret
+      ESIGN_WEBHOOK_SECRET: ci-only-esign-webhook-secret
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (deterministic — lockfile only)
+        run: npm ci
+
+      - name: Lint
+        run: npm run api:lint
+
+      - name: Typecheck
+        run: npm run api:typecheck
+
+      - name: Dependency / supply-chain scan (production dependencies)
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Prisma generate
+        run: npm run db:generate
+
+      - name: Run migrations against a clean database (never `migrate reset`/`db push`)
+        run: npm run db:migrate:deploy
+
+      - name: Seed RBAC/test fixtures
+        run: npm run db:seed
+
+      - name: Unit tests
+        run: npm run api:test
+
+      - name: E2E / integration / security / RBAC tests
+        run: npm run api:test:e2e -- --runInBand
+
+      - name: Build (also the typecheck-equivalent production compile)
+        run: npm run api:build
+
+      - name: Build production Docker image (artifact generation)
+        run: docker build -t abroad-scholarship-api:${{ github.sha }} .
+
+  deployment-gate:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - run: echo "All checks passed on main — this job is the explicit, auditable gate a deploy step would depend on. No deploy step exists yet (no target environment configured in this repository)."

@@ -1,0 +1,2453 @@
+// Database Foundation — Phase 02A
+//
+// Scope: entities required by 02-foundation/01_DATABASE_FOUNDATION.md, mapped onto the
+// field definitions of SRS section 7 (Data Model), section 8 (ID scheme), section 9
+// (status/transition rules), and the relevant 6.x functional detail sections.
+//
+// Entities intentionally NOT included in this phase (deferred to their owning phase per
+// docs/PHASE_MAP.md / docs/architecture/DOMAIN_MAP.md — not required by
+// 02-foundation/01_DATABASE_FOUNDATION.md):
+//   AcademicRecord, TestRecord, Competition, ResearchProject, Activity, WritingArtifact,
+//   WritingVersion            -> Phase 07 (counseling / "profile" evidence)
+//   UniversityChoice, ApplicationChecklist, Offer, ScholarshipApplication
+//                              -> Phase 08 (admission detail)
+//   Visa, VisaChecklistTemplate, VisaChecklistItem, Enrollment
+//                              -> Phase 09 (visa / pre-departure / enrollment)
+//   PartnerStudentLink, CommissionRule, CommissionTransaction
+//                              -> Phase 10 (partner commission detail), built out below
+//
+// Added beyond the required list, justified by SRS requirements the required list cannot
+// satisfy on its own (see docs/database/DATA_DICTIONARY.md "Additions beyond the required
+// list"):
+//   DocumentAccess  -> SRS 6.19/6.21, NFR-SEC-04, Hard Rule "private files không public URL"
+//   IdempotencyKey  -> 02-foundation/02_API_FOUNDATION.md "idempotency strategy"; infra-only,
+//                      not a business entity.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// `directUrl` — free-remote-deployment prep (Supabase). Supabase's pooled connection
+/// (PgBouncer, typically port 6543) is what the running application should use for
+/// `DATABASE_URL` (transaction-mode pooling suits a serverless-ish free-tier web service);
+/// Prisma's migration engine needs a direct, non-pooled connection (typically port 5432,
+/// `DIRECT_URL`) because some DDL operations aren't safe/supported through a transaction
+/// pooler. For local development both point at the same local Postgres — no pooler exists
+/// there, so `DATABASE_URL`/`DIRECT_URL` are simply equal. See docs/DEPLOYMENT_ENV.md.
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Shared enums
+// ---------------------------------------------------------------------------
+
+/// SRS section 3 — Vai trò và RBAC (role catalogue is seeded, not hard-coded in UI;
+/// this enum only fixes the finite set of role *codes* the identity domain understands).
+enum RoleCode {
+  EXECUTIVE_DIRECTOR
+  DEPARTMENT_MANAGER
+  CONSULTANT
+  DOCUMENT_SPECIALIST
+  SALES_MARKETING
+  ADMIN_FINANCE
+  STUDENT_PARENT
+  SYSTEM_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  OFFBOARDED
+}
+
+/// SRS 6.2 — Lead statuses: New -> Contacted -> Qualified -> Consultation -> Contracting
+/// -> Converted/Lost.
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONSULTATION
+  CONTRACTING
+  CONVERTED
+  LOST
+}
+
+/// SRS section 9 — Case: Open, Active, On Hold, Completed, Closed, Archived.
+enum CaseStatus {
+  OPEN
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CLOSED
+  ARCHIVED
+}
+
+enum CaseMemberRole {
+  OWNER
+  COLLABORATOR
+}
+
+/// SRS 6.5 — Roadmap status: Draft -> Review -> Approved -> Active -> Completed -> Archived.
+enum RoadmapStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum MilestoneStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+/// SRS 6.4 — Assessment is versioned; approved assessments are not overwritten.
+/// Phase 07 adds REVIEW between DRAFT and APPROVED — 07-profile/01_ASSESSMENT_ROADMAP.md's
+/// own versioning checklist names "draft version, review, approved version" as distinct
+/// steps, mirroring the same DRAFT→REVIEW→APPROVED shape `RoadmapStatus` already used
+/// since Phase 02 (this enum's shape was Phase 02, but nothing built on it yet — no
+/// counseling module existed before this phase, so adding a value here doesn't rewrite any
+/// running behavior).
+enum AssessmentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  SUPERSEDED
+}
+
+/// SRS section 9 — Task: Not Started, In Progress, Blocked, Done, Cancelled, Overdue
+/// (Overdue is a derived/system flag, not a value staff sets directly — see
+/// docs/database/DATA_DICTIONARY.md).
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum MasterDataStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Phase 12 — external-data-sync state for master-data catalog rows (University/Program/
+/// ScholarshipMaster). NOT_SYNCED: staff-entered, never synced. SYNCED: last write came
+/// from an external sync job. MANUAL_OVERRIDE: a staff member verified/edited the row more
+/// recently than the last sync — the sync job must not silently overwrite it on the next
+/// run. See `docs/ASSUMPTIONS.md` ASM-51.
+enum ExternalSyncStatus {
+  NOT_SYNCED
+  SYNCED
+  MANUAL_OVERRIDE
+}
+
+/// SRS section 9 — Application: Planning, Preparing, Ready for Review, Submitted, Offer,
+/// Waitlist, Reject, Withdrawn.
+enum ApplicationStatus {
+  PLANNING
+  PREPARING
+  READY_FOR_REVIEW
+  SUBMITTED
+  OFFER
+  WAITLIST
+  REJECT
+  WITHDRAWN
+}
+
+/// SRS section 9 — Document: Draft, Review, Approved, Final, Submitted, Archived.
+enum DocumentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  FINAL
+  SUBMITTED
+  ARCHIVED
+}
+
+/// Phase 12 — async malware-scan lifecycle. PENDING blocks download; CLEAN is the only
+/// status that allows it; INFECTED/ERROR stay permanently blocked (no auto-retry-forever —
+/// a re-upload is a new Document row, same "never overwrite" pattern as versioning).
+enum DocumentScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  ERROR
+}
+
+enum DocumentAccessPermission {
+  VIEW
+  DOWNLOAD
+  EDIT
+  SHARE
+}
+
+/// SRS section 9 — Contract: Draft, Review, Approved, Sent, Signed, Active, Completed,
+/// Liquidated, Archived.
+enum ContractStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  SENT
+  SIGNED
+  ACTIVE
+  COMPLETED
+  LIQUIDATED
+  ARCHIVED
+}
+
+/// SRS section 9 — Payment: Pending, Partially Paid, Paid, Overdue, Refunded, Waived.
+enum PaymentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  REFUNDED
+  WAIVED
+}
+
+enum PartnerType {
+  UNIVERSITY_REPRESENTATIVE
+  AGENCY
+  LANGUAGE_CENTER
+  OTHER
+}
+
+enum PartnerDocumentType {
+  MOU
+  AGREEMENT
+  COMMISSION_AGREEMENT
+  RATE_SHEET
+  OTHER
+}
+
+/// Phase 10 — DRAFT (uploaded, not yet effective) -> ACTIVE (signed/effective, immutable
+/// core fields from here — "Không overwrite signed/final partner documents") -> EXPIRED
+/// (lazily synced past expiryDate, same sweep pattern as OfferStatus.EXPIRED/
+/// PaymentStatus.OVERDUE) or SUPERSEDED (a newer version was activated) -> ARCHIVED
+/// (manual, relationship-ended). A DRAFT may also go straight to ARCHIVED if never signed.
+enum PartnerDocumentStatus {
+  DRAFT
+  ACTIVE
+  EXPIRED
+  SUPERSEDED
+  ARCHIVED
+}
+
+/// Phase 10 — PartnerStudentLink lifecycle. No hard-delete (Hard Rule #5); ARCHIVED
+/// preserves the link's full history.
+enum PartnerLinkStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+/// Phase 10 — what a CommissionRule's rate is computed FROM. CONTRACT_VALUE and
+/// PAYMENT_COLLECTED both read the existing Contract/Payment source of truth (never a
+/// duplicate outstanding/paid calculation); FIXED ignores any source amount and uses
+/// `fixedAmount` directly. "University-paid commission" and other bases named only
+/// abstractly in the orchestration prompt, with no concrete field/entity/trigger anywhere
+/// in 10-partners/01_PARTNER_CRM.md to calculate them from, are deliberately not built —
+/// see docs/ASSUMPTIONS.md ASM-44.
+enum CommissionBasis {
+  CONTRACT_VALUE
+  PAYMENT_COLLECTED
+  FIXED
+}
+
+/// Phase 10 — CommissionTransaction lifecycle, taken verbatim from the orchestration
+/// prompt's own example list (the only status list given anywhere for this entity) per
+/// "Chỉ sử dụng các status được instruction yêu cầu." PENDING (created) -> ELIGIBLE
+/// (confirmed the triggering event genuinely qualifies) -> CALCULATED (amount computed
+/// deterministically, backend-only) -> APPROVED (manager/ED sign-off) -> PAYABLE (finance
+/// marks ready for settlement) -> PAID (terminal). CANCELLED is reachable from any
+/// non-PAID, non-CANCELLED state with a required reason (also terminal).
+enum CommissionTransactionStatus {
+  PENDING
+  ELIGIBLE
+  CALCULATED
+  APPROVED
+  PAYABLE
+  PAID
+  CANCELLED
+}
+
+/// SRS 6.21 — Approval used for contract approval, roadmap approval, etc.
+/// `entityType` + `entityId` identify the approved record (polymorphic, per SRS
+/// "entity_type/id" pattern used for Comment/Approval).
+enum ApprovalDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  ZALO
+  WHATSAPP
+}
+
+// ---------------------------------------------------------------------------
+// Identity domain — User, Role, Permission, RolePermission
+// ---------------------------------------------------------------------------
+
+model User {
+  id               String     @id @default(uuid())
+  username         String     @unique
+  email            String     @unique
+  passwordHash     String     @map("password_hash")
+  fullName         String     @map("full_name")
+  status           UserStatus @default(ACTIVE)
+  roleId           String     @map("role_id")
+  role             Role       @relation(fields: [roleId], references: [id])
+  lastLoginAt      DateTime?  @map("last_login_at")
+  failedLoginCount Int        @default(0) @map("failed_login_count")
+  /// Brute-force lockout (03-security/01_AUTH.md). Set when failedLoginCount crosses
+  /// AUTH_LOGIN_MAX_ATTEMPTS; cleared on a successful login. A locked account gets a
+  /// distinct 423 ACCOUNT_LOCKED response (deliberately more specific than the generic
+  /// "invalid credentials" used for bad username/password, since the account owner
+  /// benefits from knowing they're locked out — see docs/security/AUTH_MODEL.md).
+  lockedUntil      DateTime?  @map("locked_until")
+  offboardedAt     DateTime?  @map("offboarded_at")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  leadsOwned            Lead[]               @relation("LeadOwner")
+  casesOwned            Case[]               @relation("CaseOwner")
+  caseMemberships       CaseMember[]
+  tasksOwned            Task[]               @relation("TaskOwner")
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  comments              Comment[]
+  approvalsDecided      Approval[]           @relation("ApprovalDecidedBy")
+  documentsUploaded     Document[]           @relation("DocumentUploadedBy")
+  documentAccessGrants  DocumentAccess[]     @relation("DocumentAccessPrincipal")
+  sessions              Session[]
+  passwordResetTokens   PasswordResetToken[]
+  mfaSecret             MfaSecret?
+  mfaBackupCodes        MfaBackupCode[]
+  studentSelfLink       Student?             @relation("StudentPortalUser")
+  contactLinks          StudentContact[]     @relation("StudentContactPortalUser")
+  parentInvitationsSent ParentInvitation[]   @relation("ParentInvitationInvitedBy")
+
+  @@map("users")
+}
+
+/// Backs refresh-token-based sessions (03-security/01_AUTH.md "session/refresh",
+/// "revoke session"). The access token is short-lived and stateless (JWT); this row is
+/// what makes revocation actually take effect — see docs/security/AUTH_MODEL.md for why
+/// access tokens are re-validated against this table on every request instead of being
+/// purely stateless.
+model Session {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  user             User      @relation(fields: [userId], references: [id])
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  userAgent        String?   @map("user_agent")
+  ipAddress        String?   @map("ip_address")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  lastUsedAt       DateTime  @default(now()) @map("last_used_at")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// SRS 6.1 "reset password bằng kênh xác minh". Single-use — `usedAt` set on consumption,
+/// a second attempt with the same token is rejected (replay prevention), not just expired.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+/// SRS 6.1 "MFA bắt buộc cho tài khoản nội bộ; khuyến nghị TOTP... backup code được mã
+/// hóa". One row per user (1:1). `secretCiphertext` is AES-256-GCM encrypted, never
+/// plaintext at rest — see common/security/mfa-encryption.ts.
+model MfaSecret {
+  userId           String    @id @map("user_id")
+  user             User      @relation(fields: [userId], references: [id])
+  secretCiphertext String    @map("secret_ciphertext")
+  enabled          Boolean   @default(false)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  confirmedAt      DateTime? @map("confirmed_at")
+
+  @@map("mfa_secrets")
+}
+
+model MfaBackupCode {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id])
+  codeHash  String    @unique @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("mfa_backup_codes")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  code        RoleCode @unique
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users           User[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+/// SRS 6.1 — "permission theo module/action: view, create, edit, approve, download,
+/// export, share, delete, assign" + field-level scope (SRS 6.1, 13).
+model Permission {
+  id          String   @id @default(uuid())
+  resource    String
+  action      String
+  fieldScope  String?  @map("field_scope")
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@unique([resource, action, fieldScope])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// CRM domain — Lead
+// ---------------------------------------------------------------------------
+
+/// SRS 6.2. Business ID format LEAD-YYYY-NNNNN (SRS section 8) — immutable once assigned.
+model Lead {
+  id                 String     @id @default(uuid())
+  leadCode           String     @unique @map("lead_code")
+  contactName        String     @map("contact_name")
+  parentName         String?    @map("parent_name")
+  email              String?
+  phone              String?
+  source             String?
+  campaign           String?
+  countryInterest    String?    @map("country_interest")
+  majorInterest      String?    @map("major_interest")
+  intake             String?
+  serviceInterest    String?    @map("service_interest")
+  ownerId            String     @map("owner_id")
+  owner              User       @relation("LeadOwner", fields: [ownerId], references: [id])
+  score              Int?
+  status             LeadStatus @default(NEW)
+  /// Deliberately NOT @unique — 04-core-crm/01_LEAD.md's merge flow lets multiple Leads
+  /// (e.g. duplicate inquiries from the same family) resolve to the SAME Student. An
+  /// earlier version of this column was @unique, which made LeadsService.convert()'s
+  /// MERGE path fail with a real Postgres unique-constraint violation the moment a second
+  /// Lead tried to point at an already-converted Student — caught by
+  /// apps/api/test/lead-conversion.e2e-spec.ts, not by inspection. See
+  /// docs/ASSUMPTIONS.md ASM-11 / docs/DECISIONS.md DEC-03.
+  convertedStudentId String?    @map("converted_student_id")
+  convertedStudent   Student?   @relation(fields: [convertedStudentId], references: [id])
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+
+  @@index([convertedStudentId])
+  @@index([status])
+  @@index([ownerId])
+  @@map("leads")
+}
+
+// ---------------------------------------------------------------------------
+// Case Management domain — Student, StudentContact, Case, CaseMember, Task,
+// TaskDependency
+// ---------------------------------------------------------------------------
+
+/// SRS section 1 — "Một học sinh = một Student ID xuyên suốt vòng đời". Business ID format
+/// HS-YYYY-NNNNN (SRS section 8, resolved per section 14 note — see ASM/ARCH-DEC history
+/// in docs/ASSUMPTIONS.md and docs/architecture/DECISIONS.md).
+model Student {
+  id             String    @id @default(uuid())
+  studentCode    String    @unique @map("student_code")
+  fullName       String    @map("full_name")
+  dateOfBirth    DateTime? @map("date_of_birth")
+  email          String?
+  phone          String?
+  targetCountry  String?   @map("target_country")
+  targetMajor    String?   @map("target_major")
+  targetIntake   String?   @map("target_intake")
+  budget         Decimal?  @db.Decimal(14, 2)
+  budgetCurrency String?   @map("budget_currency") @db.Char(3)
+  archivedAt     DateTime? @map("archived_at")
+  /// SRS role table "HS/PHHS: Chính tài khoản của mình" + 03-security/02_RBAC.md scope
+  /// "Student self". Nullable — most Student rows have no portal account (staff-entered,
+  /// no login yet). Added in Phase 03 because RBAC "Student self" scope is impossible to
+  /// enforce without a concrete link from a User to the Student they represent — see
+  /// docs/ASSUMPTIONS.md ASM-05.
+  portalUserId   String?   @unique @map("portal_user_id")
+  portalUser     User?     @relation("StudentPortalUser", fields: [portalUserId], references: [id])
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  /// Plural — see the comment on Lead.convertedStudentId: more than one Lead can resolve
+  /// to this Student via the merge flow (04-core-crm/01_LEAD.md).
+  leadOrigins  Lead[]
+  contacts     StudentContact[]
+  cases        Case[]
+  applications Application[]
+  contracts    Contract[]
+
+  /// Phase 08 — Admission (08-admission/*.md), Student-scoped (UniversityChoice) or
+  /// Student+Case-scoped (ScholarshipApplication) per docs/architecture/DOMAIN_MAP.md
+  /// domain 5.
+  universityChoices       UniversityChoice[]
+  scholarshipApplications ScholarshipApplication[]
+
+  /// Phase 09 — Visa (09-visa/*.md), Student+Case-scoped per docs/architecture/
+  /// DOMAIN_MAP.md domain 6.
+  visas       Visa[]
+  enrollments Enrollment[]
+
+  /// Phase 10 — Partners (10-partners/*.md), domain 8's junction/fact tables reference
+  /// Student directly (never duplicated).
+  partnerStudentLinks    PartnerStudentLink[]
+  commissionTransactions CommissionTransaction[]
+
+  @@map("students")
+}
+
+/// SRS 6.3 — parent/guardian and other contacts of a Student.
+/// Phase 11 (Portal) — DEC-06: `portalUserId`'s Phase 03 `@unique` constraint is relaxed to
+/// a plain index. A single Parent (one `User` account) commonly has more than one child in
+/// the system — 11-portal/01_STUDENT_PARENT_PORTAL.md "Nếu một Parent liên kết nhiều
+/// Student: phải chọn đúng Student context" presupposes exactly this — but the Phase 03
+/// constraint would have permanently forced a separate User account per child. See
+/// `docs/DECISIONS.md` DEC-06.
+model StudentContact {
+  id           String           @id @default(uuid())
+  studentId    String           @map("student_id")
+  student      Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type         String
+  name         String
+  relationship String?
+  phone        String?
+  email        String?
+  /// RBAC scope "Parent-linked student" (03-security/02_RBAC.md). Nullable — most
+  /// contacts (e.g. staff-entered emergency contact) have no portal login. See
+  /// docs/ASSUMPTIONS.md ASM-05.
+  portalUserId String?          @map("portal_user_id")
+  portalUser   User?            @relation("StudentContactPortalUser", fields: [portalUserId], references: [id])
+  /// Phase 11 addition — the parent-portal relationship's own lifecycle state, independent
+  /// of whether `portalUserId` happens to be set (kept even after REVOKED, for history/
+  /// audit — never nulled out). Every `ScopePolicyService` OWN_STUDENT check additionally
+  /// requires `portalStatus = ACTIVE`, not just a non-null `portalUserId` — "quyền truy cập
+  /// phải mất ngay theo policy" once revoked. See `docs/ASSUMPTIONS.md` ASM-46.
+  portalStatus PortalLinkStatus @default(NONE) @map("portal_status")
+  revokedAt    DateTime?        @map("revoked_at")
+  revokedById  String?          @map("revoked_by_id")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  invitations ParentInvitation[]
+
+  @@index([studentId])
+  @@index([portalUserId])
+  @@map("student_contacts")
+}
+
+/// Phase 11 — StudentContact's portal-access lifecycle: NONE (never invited) -> INVITED
+/// (a ParentInvitation is outstanding) -> ACTIVE (accepted, portalUserId set) -> REVOKED
+/// (staff-revoked; portalUserId and history are retained, not cleared). REVOKED ->
+/// INVITED is allowed (re-inviting the same contact creates a new ParentInvitation row).
+enum PortalLinkStatus {
+  NONE
+  INVITED
+  ACTIVE
+  REVOKED
+}
+
+/// Phase 11 — one row per invite ATTEMPT (supports re-invite history after an expiry/
+/// revoke, unlike a single set of mutable fields on StudentContact) — same
+/// hash-only-token/expiry/single-use-flag shape as `password_reset_tokens`/
+/// `ContractReviewLink.tokenHash` (never the raw token persisted). "Verification" is
+/// token possession, the same standard this codebase already applies to password reset —
+/// see `docs/ASSUMPTIONS.md` ASM-46.
+model ParentInvitation {
+  id               String         @id @default(uuid())
+  studentContactId String         @map("student_contact_id")
+  studentContact   StudentContact @relation(fields: [studentContactId], references: [id], onDelete: Cascade)
+  tokenHash        String         @unique @map("token_hash")
+  expiresAt        DateTime       @map("expires_at")
+  invitedById      String         @map("invited_by_id")
+  invitedBy        User           @relation("ParentInvitationInvitedBy", fields: [invitedById], references: [id])
+  acceptedAt       DateTime?      @map("accepted_at")
+  revokedAt        DateTime?      @map("revoked_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  @@index([studentContactId])
+  @@map("parent_invitations")
+}
+
+/// SRS section 19 — Case is one of the five cross-cutting data axes. Business ID format
+/// CASE-YYYY-NNNNN.
+model Case {
+  id            String     @id @default(uuid())
+  caseCode      String     @unique @map("case_code")
+  studentId     String     @map("student_id")
+  student       Student    @relation(fields: [studentId], references: [id])
+  contractId    String?    @unique @map("contract_id")
+  contract      Contract?  @relation(fields: [contractId], references: [id])
+  ownerId       String     @map("owner_id")
+  owner         User       @relation("CaseOwner", fields: [ownerId], references: [id])
+  /// 04-core-crm/02_STUDENT_CASE.md field list. Free-text/descriptive only — NOT used for
+  /// scope enforcement (see docs/ASSUMPTIONS.md ASM-06: DEPARTMENT_MANAGER's RBAC scope
+  /// is GLOBAL precisely because no structured `Department` entity exists anywhere in the
+  /// project; adding one now, for a single descriptive column, would be the entity
+  /// invention ASM-06 already declined to do). Configurable master data in spirit (SRS
+  /// section 2), not a hard-coded enum.
+  department    String?
+  stage         String
+  status        CaseStatus @default(OPEN)
+  closureReason String?    @map("closure_reason")
+  openedAt      DateTime   @default(now()) @map("opened_at")
+  closedAt      DateTime?  @map("closed_at")
+  archivedAt    DateTime?  @map("archived_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  members      CaseMember[]
+  tasks        Task[]
+  assessments  Assessment[]
+  roadmaps     Roadmap[]
+  applications Application[]
+
+  /// Phase 07 — Profile Evidence + Writing (07-profile/*.md), all Case-scoped per
+  /// docs/architecture/DOMAIN_MAP.md domain 4 (Counseling).
+  academicRecords         AcademicRecord[]
+  testRecords             TestRecord[]
+  competitions            Competition[]
+  researchProjects        ResearchProject[]
+  activities              Activity[]
+  writingArtifacts        WritingArtifact[]
+  lettersOfRecommendation LetterOfRecommendation[]
+
+  /// Phase 08 — Admission (08-admission/*.md), Case-scoped per docs/architecture/
+  /// DOMAIN_MAP.md domain 5.
+  universityChoices       UniversityChoice[]
+  scholarshipApplications ScholarshipApplication[]
+
+  /// Phase 09 — Visa (09-visa/*.md), Case-scoped per docs/architecture/DOMAIN_MAP.md
+  /// domain 6.
+  visas       Visa[]
+  enrollments Enrollment[]
+
+  /// Phase 10 — Partners (10-partners/*.md), domain 8's junction/fact tables.
+  partnerStudentLinks    PartnerStudentLink[]
+  commissionTransactions CommissionTransaction[]
+
+  @@index([studentId])
+  @@index([status])
+  @@map("cases")
+}
+
+model CaseMember {
+  caseId    String         @map("case_id")
+  userId    String         @map("user_id")
+  case      Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id])
+  role      CaseMemberRole @default(COLLABORATOR)
+  addedAt   DateTime       @default(now()) @map("added_at")
+  /// 04-core-crm/02_STUDENT_CASE.md "active dates". Nullable — set when a member is
+  /// removed from the case; a removed-then-re-added member simply gets this cleared back
+  /// to null rather than a new history row (this table stays a flat current-membership
+  /// table, not a full membership-history log — AuditLog already captures the add/remove
+  /// events themselves for history purposes).
+  removedAt DateTime?      @map("removed_at")
+
+  @@id([caseId, userId])
+  @@map("case_members")
+}
+
+/// Phase 06 — which workflow event a `TaskTemplate` auto-generates a Task on
+/// (06-operations/01_TASK.md "Auto-generated tasks on: case creation, stage change, ...,
+/// contract activation, ..."). Only the triggers already buildable in this phase are
+/// listed — `application`/`visa`/`scholarship` triggers the instruction file also names
+/// have no owning entity/controller yet (Phase 07/08/09 per docs/PHASE_MAP.md); adding
+/// enum values for events nothing can fire yet would be inventing ahead of those phases'
+/// own instructions. See docs/ASSUMPTIONS.md ASM-16.
+enum TaskTemplateTrigger {
+  CASE_CREATED
+  CASE_STAGE_CHANGED
+  CONTRACT_ACTIVATED
+  /// Phase 07 — 07-profile/01_ASSESSMENT_ROADMAP.md "Nếu Roadmap tạo task tự động: phải
+  /// dùng TaskGenerationService hiện tại." Fires once per Roadmap reaching APPROVED (not
+  /// per-milestone — see docs/ASSUMPTIONS.md for the scoping rationale).
+  ROADMAP_APPROVED
+  /// Phase 08 — 06-operations/01_TASK.md itself named "application"/"scholarship" as
+  /// auto-generation triggers back in Phase 06, deliberately deferred then (no owning
+  /// entity existed yet — docs/ASSUMPTIONS.md ASM-16). Application/ScholarshipApplication
+  /// now exist (08-admission/*.md); these two values are that deferred extension, fired
+  /// once each at the most significant milestone transition (submission / award) — the
+  /// same "significant milestone, not every transition" scoping already used for
+  /// CONTRACT_ACTIVATED/ROADMAP_APPROVED.
+  APPLICATION_SUBMITTED
+  SCHOLARSHIP_AWARDED
+  /// Phase 09 — 06-operations/01_TASK.md's own trigger list named "visa" back in Phase 06,
+  /// the last of that file's originally-deferred triggers (case creation/stage change and
+  /// contract activation were Phase 06 itself; application/scholarship were Phase 08 — see
+  /// docs/ASSUMPTIONS.md ASM-16/ASM-30). Fires once per Visa reaching GRANTED — the
+  /// significant-milestone moment, same scoping as every trigger above.
+  VISA_GRANTED
+}
+
+/// SRS 6.18 "Task template có thể sinh tự động khi stage/case thay đổi". One row per
+/// auto-generation rule; `TaskGenerationService` matches active templates against a fired
+/// trigger event and creates a `Task` per match — deduplicated via `Task`'s own
+/// `(templateId, sourceEntityType, sourceEntityId)` unique constraint (below), not a
+/// separate log table.
+model TaskTemplate {
+  id                 String              @id @default(uuid())
+  code               String              @unique
+  name               String
+  module             String
+  taskType           String              @map("task_type")
+  title              String
+  priority           String?
+  /// Deadline = trigger-event time + this many days. Nullable — a template may not want a
+  /// default deadline (owner sets one manually after the task is generated).
+  deadlineOffsetDays Int?                @map("deadline_offset_days")
+  triggerEvent       TaskTemplateTrigger @map("trigger_event")
+  /// Only meaningful when triggerEvent = CASE_STAGE_CHANGED — which `Case.stage` value
+  /// (free-text, see Case.stage's own comment) fires this template. Null for other
+  /// trigger events.
+  triggerStageValue  String?             @map("trigger_stage_value")
+  active             Boolean             @default(true)
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  generatedTasks Task[]
+
+  @@index([triggerEvent])
+  @@map("task_templates")
+}
+
+/// SRS 6.18 — Task fields; KPI derives from this table (not entered manually, AC-15).
+/// Business ID format TASK-YYYY-NNNNN.
+model Task {
+  id               String            @id @default(uuid())
+  taskCode         String            @unique @map("task_code")
+  caseId           String?           @map("case_id")
+  case             Case?             @relation(fields: [caseId], references: [id])
+  module           String
+  taskType         String            @map("task_type")
+  title            String
+  ownerId          String            @map("owner_id")
+  owner            User              @relation("TaskOwner", fields: [ownerId], references: [id])
+  priority         String?
+  startAt          DateTime?         @map("start_at")
+  deadline         DateTime
+  status           TaskStatus        @default(NOT_STARTED)
+  output           String?
+  qualityScore     Int?              @map("quality_score")
+  blocker          String?
+  /// Phase 06 auto-generation lineage — set only for tasks created by
+  /// `TaskGenerationService` from a `TaskTemplate`; null for manually-created tasks.
+  templateId       String?           @map("template_id")
+  template         TaskTemplate?     @relation(fields: [templateId], references: [id])
+  /// Polymorphic — same "entityType/entityId string pair" convention already used by
+  /// `Comment`/`Approval` (not a new pattern). Identifies which source record (a Case, a
+  /// Contract, ...) this generated task belongs to, together forming the idempotency key
+  /// with `templateId` below — 06-operations/01_TASK.md "Nếu event/API bị retry, task
+  /// generation phải idempotent."
+  sourceEntityType String?           @map("source_entity_type")
+  sourceEntityId   String?           @map("source_entity_id")
+  /// Phase 07 — 07-profile/01_ASSESSMENT_ROADMAP.md "Roadmap milestone phải sử dụng Task
+  /// engine hiện tại khi cần... Không duplicate Task entity hoặc workflow." A milestone's
+  /// execution work IS an ordinary Task, just optionally tagged with which milestone it
+  /// belongs to — not a parallel milestone-task concept.
+  milestoneId      String?           @map("milestone_id")
+  milestone        RoadmapMilestone? @relation(fields: [milestoneId], references: [id])
+  /// Phase 11 (Portal) addition — "Student có thể thấy tasks explicitly assigned/shared
+  /// with student... không tự động được thấy tất cả internal staff tasks." Default false:
+  /// every pre-existing Task (and every new one, unless explicitly opted in) stays
+  /// staff-only, matching Phase 06's "internal tooling" design intent unchanged.
+  visibleToStudent Boolean           @default(false) @map("visible_to_student")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  dependsOn  TaskDependency[] @relation("DependentTask")
+  dependedBy TaskDependency[] @relation("DependsOnTask")
+
+  @@unique([templateId, sourceEntityType, sourceEntityId])
+  @@index([caseId])
+  @@index([ownerId])
+  @@index([status])
+  @@index([deadline])
+  @@index([milestoneId])
+  @@map("tasks")
+}
+
+model TaskDependency {
+  taskId          String   @map("task_id")
+  dependsOnTaskId String   @map("depends_on_task_id")
+  task            Task     @relation("DependentTask", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTask   Task     @relation("DependsOnTask", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@id([taskId, dependsOnTaskId])
+  @@map("task_dependencies")
+}
+
+// ---------------------------------------------------------------------------
+// Counseling domain — Assessment, AssessmentCriterion, Roadmap, RoadmapMilestone,
+// RoadmapMilestoneDependency (Phase 02 foundation, extended Phase 07 — 07-profile/
+// 01_ASSESSMENT_ROADMAP.md)
+// ---------------------------------------------------------------------------
+
+/// SRS 6.4 — versioned; approved assessment cannot be overwritten (new version instead,
+/// via `AssessmentsService.createNextVersion` — never an in-place edit of an APPROVED row).
+/// `baseline`/`gap` are the Phase 02 free-form snapshot fields, kept as-is (unused by any
+/// running code before this phase, so extending rather than repurposing them is not a
+/// rewrite) — `AssessmentCriterion` below is the structured, evidence-linked store the
+/// service layer actually reads/writes per-area data from.
+model Assessment {
+  id           String           @id @default(uuid())
+  caseId       String           @map("case_id")
+  case         Case             @relation(fields: [caseId], references: [id])
+  version      Int
+  baseline     Json?
+  gap          Json?
+  status       AssessmentStatus @default(DRAFT)
+  /// Set only when creating a version after a previous one was APPROVED — why this
+  /// re-assessment happened. Null for a case's first (version 1) assessment.
+  changeReason String?          @map("change_reason")
+  approvedById String?          @map("approved_by_id")
+  approvedAt   DateTime?        @map("approved_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  criteria AssessmentCriterion[]
+  roadmaps Roadmap[]
+
+  @@unique([caseId, version])
+  @@map("assessments")
+}
+
+/// One row per assessment area (07-profile/01_ASSESSMENT_ROADMAP.md "Assessment areas:
+/// Academic, English, Test, Research, Competition, Leadership, Community, Awards,
+/// Writing" — a suggested, not hard-coded, set; `area` is free text like `Case.stage`,
+/// not an enum, so a 10th area never needs a migration). `evidenceDocumentId` is a real FK
+/// (not a plain string reference like `Contract.signedDocumentId` in Phase 05) because
+/// Phase 07 is the phase that stands up the Document module's actual permission-checked
+/// read path — see docs/ASSUMPTIONS.md.
+model AssessmentCriterion {
+  id                 String     @id @default(uuid())
+  assessmentId       String     @map("assessment_id")
+  assessment         Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  area               String
+  currentScore       Decimal?   @map("current_score") @db.Decimal(6, 2)
+  targetScore        Decimal?   @map("target_score") @db.Decimal(6, 2)
+  gap                Decimal?   @db.Decimal(6, 2)
+  priority           String?
+  recommendation     String?
+  evidenceDocumentId String?    @map("evidence_document_id")
+  evidenceDocument   Document?  @relation("AssessmentCriterionEvidence", fields: [evidenceDocumentId], references: [id])
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+
+  @@unique([assessmentId, area])
+  @@map("assessment_criteria")
+}
+
+/// SRS 6.5 — "Roadmap chỉ được approve khi assessment baseline tồn tại" enforced at the
+/// service layer (see docs/api/API_CONVENTIONS.md); `assessmentId` records which baseline
+/// backs this roadmap version — a stable FK to one specific `Assessment` row (never
+/// silently repointed to a newer version, 07-profile/01_ASSESSMENT_ROADMAP.md "Không được
+/// silently dùng version mới khi roadmap đang dựa trên version cũ").
+model Roadmap {
+  id           String        @id @default(uuid())
+  caseId       String        @map("case_id")
+  case         Case          @relation(fields: [caseId], references: [id])
+  assessmentId String?       @map("assessment_id")
+  assessment   Assessment?   @relation(fields: [assessmentId], references: [id])
+  version      Int
+  horizonYears Int?          @map("horizon_years")
+  status       RoadmapStatus @default(DRAFT)
+  approvedById String?       @map("approved_by_id")
+  approvedAt   DateTime?     @map("approved_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  milestones RoadmapMilestone[]
+
+  @@unique([caseId, version])
+  @@map("roadmaps")
+}
+
+model RoadmapMilestone {
+  id                 String          @id @default(uuid())
+  roadmapId          String          @map("roadmap_id")
+  roadmap            Roadmap         @relation(fields: [roadmapId], references: [id], onDelete: Cascade)
+  stage              String?
+  objective          String
+  metric             String?
+  target             String?
+  ownerRole          RoleCode?       @map("owner_role")
+  /// Phase 07 addition — the actual assigned staff member, distinct from `ownerRole`
+  /// (Phase 02's role-category hint). "Owner phải thuộc scope hợp lệ" is enforced at the
+  /// service layer (must be a member of the roadmap's Case) when this is set.
+  ownerId            String?         @map("owner_id")
+  startAt            DateTime?       @map("start_at")
+  deadline           DateTime?
+  status             MilestoneStatus @default(NOT_STARTED)
+  evidenceDocumentId String?         @map("evidence_document_id")
+  evidenceDocument   Document?       @relation("RoadmapMilestoneEvidence", fields: [evidenceDocumentId], references: [id])
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  /// Task Engine reuse (Phase 06) — a milestone's execution work is tagged onto ordinary
+  /// `Task` rows via `Task.milestoneId`, never a parallel task-like concept.
+  tasks      Task[]
+  dependsOn  RoadmapMilestoneDependency[] @relation("DependentMilestone")
+  dependedBy RoadmapMilestoneDependency[] @relation("DependsOnMilestone")
+
+  @@index([roadmapId])
+  @@map("roadmap_milestones")
+}
+
+/// Milestone-level sequencing — deliberately a separate table from `TaskDependency`, not
+/// a reuse of it: a Milestone is a planning unit that can carry multiple Tasks, and
+/// "Milestone B cannot start until Milestone A is done" is a roadmap-planning concern
+/// distinct from task-execution ordering (07-profile/01_ASSESSMENT_ROADMAP.md lists
+/// "dependencies" and "task linkage" as separate checklist items). Same shape as
+/// `TaskDependency` — self/circular rejection and the DONE-or-CANCELLED completion gate
+/// are enforced identically in `RoadmapsService`.
+model RoadmapMilestoneDependency {
+  milestoneId          String           @map("milestone_id")
+  dependsOnMilestoneId String           @map("depends_on_milestone_id")
+  milestone            RoadmapMilestone @relation("DependentMilestone", fields: [milestoneId], references: [id], onDelete: Cascade)
+  dependsOnMilestone   RoadmapMilestone @relation("DependsOnMilestone", fields: [dependsOnMilestoneId], references: [id], onDelete: Cascade)
+  createdAt            DateTime         @default(now()) @map("created_at")
+
+  @@id([milestoneId, dependsOnMilestoneId])
+  @@map("roadmap_milestone_dependencies")
+}
+
+// ---------------------------------------------------------------------------
+// Counseling domain, Profile Evidence — AcademicRecord, TestRecord, Competition,
+// ResearchProject, Activity (Phase 07 — 07-profile/02_PROFILE_EVIDENCE.md)
+// ---------------------------------------------------------------------------
+
+/// SRS 6.7. One row per (school, period) — never overwritten across periods; a later
+/// period is always a NEW row, never a replacement of an earlier one ("Không overwrite
+/// historical academic records nếu đó là dữ liệu theo kỳ/năm"). Editing THIS period's own
+/// GPA in place (a correction) is fine — that's not the history the rule protects.
+model AcademicRecord {
+  id                 String    @id @default(uuid())
+  caseId             String    @map("case_id")
+  case               Case      @relation(fields: [caseId], references: [id])
+  school             String
+  /// Free text (e.g. "Grade 11, 2024–2025", "Fall 2024") — school terms/calendars vary too
+  /// widely for a fixed enum, same "configurable, not hard-coded" precedent as `Case.stage`.
+  period             String
+  gpa                Decimal?  @db.Decimal(5, 2)
+  gradingScale       String?   @map("grading_scale")
+  evidenceDocumentId String?   @map("evidence_document_id")
+  evidenceDocument   Document? @relation("AcademicRecordEvidence", fields: [evidenceDocumentId], references: [id])
+  verifiedById       String?   @map("verified_by_id")
+  verifiedAt         DateTime? @map("verified_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([caseId])
+  @@map("academic_records")
+}
+
+/// SRS 6.7. One row per attempt — a new attempt is always a new row, the previous
+/// attempt's row is never overwritten ("Một Student có thể có nhiều attempt. Không
+/// overwrite attempt trước"). `testType` is free text (not a fixed IELTS/SAT enum) —
+/// 07-profile/02_PROFILE_EVIDENCE.md "Không hard-code chỉ IELTS hoặc SAT."
+model TestRecord {
+  id                 String    @id @default(uuid())
+  caseId             String    @map("case_id")
+  case               Case      @relation(fields: [caseId], references: [id])
+  testType           String    @map("test_type")
+  attemptNumber      Int       @map("attempt_number")
+  testDate           DateTime? @map("test_date")
+  plannedDate        DateTime? @map("planned_date")
+  score              Decimal?  @db.Decimal(6, 2)
+  subscores          Json?
+  target             Decimal?  @db.Decimal(6, 2)
+  evidenceDocumentId String?   @map("evidence_document_id")
+  evidenceDocument   Document? @relation("TestRecordEvidence", fields: [evidenceDocumentId], references: [id])
+  verifiedById       String?   @map("verified_by_id")
+  verifiedAt         DateTime? @map("verified_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@unique([caseId, testType, attemptNumber])
+  @@index([caseId])
+  @@map("test_records")
+}
+
+/// SRS 6.8. Each participation is its own row — "nếu có nhiều competition, mỗi
+/// participation là một record riêng," never folded into a single Student-level summary.
+model Competition {
+  id                 String    @id @default(uuid())
+  /// SRS §8 business-ID format `COMP-YYYY-NNNNN` — added Phase 13 (was missing since
+  /// Phase 07; every other §8-listed entity already had its code generated via
+  /// `IdGeneratorService.nextYearlyCode`, this one was simply overlooked).
+  competitionCode    String    @unique @map("competition_code")
+  caseId             String    @map("case_id")
+  case               Case      @relation(fields: [caseId], references: [id])
+  eventName          String    @map("event_name")
+  year               Int?
+  season             String?
+  category           String?
+  registrationStatus String?   @map("registration_status")
+  preparation        String?
+  result             String?
+  rank               String?
+  award              String?
+  evidenceDocumentId String?   @map("evidence_document_id")
+  evidenceDocument   Document? @relation("CompetitionEvidence", fields: [evidenceDocumentId], references: [id])
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([caseId])
+  @@map("competitions")
+}
+
+/// SRS 6.8. Deliberately its own entity, not folded into `Activity` or `WritingArtifact`
+/// (07-profile/02_PROFILE_EVIDENCE.md "Không tạo Research model trùng với Activity hoặc
+/// Writing") — a research project has its own shape (mentor, methodology, publication)
+/// that neither of those captures.
+model ResearchProject {
+  id                 String    @id @default(uuid())
+  /// SRS §8 business-ID format `RES-YYYY-NNNNN` — added Phase 13, see the identical note
+  /// on `Competition.competitionCode`.
+  researchCode       String    @unique @map("research_code")
+  caseId             String    @map("case_id")
+  case               Case      @relation(fields: [caseId], references: [id])
+  title              String
+  mentor             String?
+  role               String?
+  startAt            DateTime? @map("start_at")
+  endAt              DateTime? @map("end_at")
+  methodology        String?
+  output             String?
+  publication        String?
+  award              String?
+  evidenceDocumentId String?   @map("evidence_document_id")
+  evidenceDocument   Document? @relation("ResearchProjectEvidence", fields: [evidenceDocumentId], references: [id])
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([caseId])
+  @@map("research_projects")
+}
+
+/// SRS 6.8. `category` is free text/configurable — 07-profile/02_PROFILE_EVIDENCE.md
+/// "Không giới hạn activity vào một loại cố định nếu tài liệu yêu cầu configurable
+/// categories."
+model Activity {
+  id                 String    @id @default(uuid())
+  caseId             String    @map("case_id")
+  case               Case      @relation(fields: [caseId], references: [id])
+  organization       String
+  role               String?
+  category           String?
+  description        String?
+  startAt            DateTime? @map("start_at")
+  endAt              DateTime? @map("end_at")
+  hours              Decimal?  @db.Decimal(6, 1)
+  impact             String?
+  verifierName       String?   @map("verifier_name")
+  verifiedById       String?   @map("verified_by_id")
+  verifiedAt         DateTime? @map("verified_at")
+  evidenceDocumentId String?   @map("evidence_document_id")
+  evidenceDocument   Document? @relation("ActivityEvidence", fields: [evidenceDocumentId], references: [id])
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([caseId])
+  @@map("activities")
+}
+
+// ---------------------------------------------------------------------------
+// Counseling domain, Writing — WritingArtifact, WritingVersion,
+// LetterOfRecommendation (Phase 07 — 07-profile/03_WRITING.md)
+// ---------------------------------------------------------------------------
+
+/// SRS 6.6 — Draft→Review→Revision→Final→Submitted, enforced server-side
+/// (`WritingService.updateStatus`), never a client-supplied arbitrary status.
+enum WritingStatus {
+  DRAFT
+  REVIEW
+  REVISION
+  FINAL
+  SUBMITTED
+}
+
+/// A per-version reviewer verdict — distinct from `WritingArtifact.status` (the overall
+/// workflow gate). Reviewing a version never mutates its content; only sets this + who +
+/// when.
+enum WritingReviewStatus {
+  PENDING
+  APPROVED
+  CHANGES_REQUESTED
+}
+
+/// SRS 6.6. `type` is free text (Resume/Essay/SOP/Motivation Letter/Study Plan/LOR/
+/// custom...) — 03_WRITING.md "custom types," same configurable-field precedent as
+/// `Case.stage`/`AssessmentCriterion.area`, not a fixed enum a new writing type would need
+/// a migration to add.
+model WritingArtifact {
+  id        String        @id @default(uuid())
+  caseId    String        @map("case_id")
+  case      Case          @relation(fields: [caseId], references: [id])
+  type      String
+  title     String
+  status    WritingStatus @default(DRAFT)
+  ownerId   String        @map("owner_id")
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  versions WritingVersion[]
+
+  /// Phase 08 — a ScholarshipApplication's essay reuses the Phase 07 Writing subsystem
+  /// (`type: "Scholarship Essay"`, free text, per WritingArtifact.type's own configurable-
+  /// field design) instead of a duplicate essay/content field on ScholarshipApplication.
+  scholarshipEssayFor ScholarshipApplication[]
+
+  @@index([caseId])
+  @@map("writing_artifacts")
+}
+
+/// "WritingArtifact và WritingVersion phải tách biệt. Không overwrite version cũ" — a
+/// `WritingVersion` row, once created, is never updated except for its review fields
+/// (`reviewStatus`/`reviewerId`/`reviewedAt` — a verdict, not content). New content always
+/// means a new row with `versionNumber + 1`; there is no "edit this version's text"
+/// endpoint at all, so destructive editing of Final/Submitted content is structurally
+/// impossible, not just policy-forbidden.
+model WritingVersion {
+  id            String              @id @default(uuid())
+  artifactId    String              @map("artifact_id")
+  artifact      WritingArtifact     @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  versionNumber Int                 @map("version_number")
+  createdById   String              @map("created_by_id")
+  changeSummary String?             @map("change_summary")
+  /// Inline text content — nullable because a version may instead (or also) reference an
+  /// uploaded file via `documentId`.
+  content       String?
+  documentId    String?             @map("document_id")
+  document      Document?           @relation("WritingVersionFile", fields: [documentId], references: [id])
+  reviewStatus  WritingReviewStatus @default(PENDING) @map("review_status")
+  reviewerId    String?             @map("reviewer_id")
+  reviewedAt    DateTime?           @map("reviewed_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  @@unique([artifactId, versionNumber])
+  @@map("writing_versions")
+}
+
+enum LorRequestStatus {
+  NOT_REQUESTED
+  REQUESTED
+  IN_PROGRESS
+  RECEIVED
+  DECLINED
+}
+
+enum LorSubmissionStatus {
+  PENDING
+  SUBMITTED
+  NOT_REQUIRED
+}
+
+/// SRS 6.6. Its own entity (not a `WritingArtifact` row typed "LOR") — a recommendation
+/// letter's tracking shape (recommender contact, request/submission logistics) has nothing
+/// in common with `WritingVersion`'s content/review shape.
+model LetterOfRecommendation {
+  id                 String              @id @default(uuid())
+  caseId             String              @map("case_id")
+  case               Case                @relation(fields: [caseId], references: [id])
+  recommenderName    String              @map("recommender_name")
+  relationship       String?
+  contactEmail       String?             @map("contact_email")
+  contactPhone       String?             @map("contact_phone")
+  requestDate        DateTime?           @map("request_date")
+  deadline           DateTime?
+  requestStatus      LorRequestStatus    @default(NOT_REQUESTED) @map("request_status")
+  submissionStatus   LorSubmissionStatus @default(PENDING) @map("submission_status")
+  /// Field-level restricted from Student/Parent (recommender contact details / internal
+  /// tracking notes are staff-only) — see `FieldPolicyService.redactLor`.
+  internalNotes      String?             @map("internal_notes")
+  evidenceDocumentId String?             @map("evidence_document_id")
+  evidenceDocument   Document?           @relation("LetterOfRecommendationEvidence", fields: [evidenceDocumentId], references: [id])
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  @@index([caseId])
+  @@map("letters_of_recommendation")
+}
+
+// ---------------------------------------------------------------------------
+// Admission domain (foundation slice, extended Phase 08 — 08-admission/*.md) —
+// University, Program, ScholarshipMaster, UniversityChoice, Application,
+// ApplicationChecklist, Offer, ScholarshipApplication
+// ---------------------------------------------------------------------------
+
+/// SRS 6.9 — master data with verification metadata, owned by `admission`, distinct from
+/// Partner (see docs/architecture/DECISIONS.md ARCH-DEC-03). Shared across every Program/
+/// Application/UniversityChoice that references it — 08-admission/01_MASTER_DATA.md
+/// "Không duplicate University chỉ vì nhiều Program/Application/Student/intake/Partner
+/// Program." `ownerId` (Phase 08, plain string — same FK-less "assigned staff pointer"
+/// pattern as `RoadmapMilestone.ownerId`, not a formal Prisma relation) and `source` are
+/// master-data-only fields, deliberately absent from every transaction entity that
+/// references a University (no duplicated university name/owner in Application etc.).
+model University {
+  id             String             @id @default(uuid())
+  universityCode String             @unique @map("university_code")
+  officialName   String             @map("official_name")
+  countryCode    String             @map("country_code") @db.Char(2)
+  city           String?
+  campus         String?
+  website        String?
+  admissionsUrl  String?            @map("admissions_url")
+  status         MasterDataStatus   @default(ACTIVE)
+  ownerId        String?            @map("owner_id")
+  source         String?
+  /// Phase 12 external-data-sync fields (12-platform/02_INTEGRATIONS_JOBS.md "source, URL,
+  /// retrieved_at, last_verified_at, sync status, external ID"). `sourceUrl`/`externalId`
+  /// are nullable — most existing rows were staff-entered, never synced. See
+  /// `docs/ASSUMPTIONS.md` ASM-51.
+  sourceUrl      String?            @map("source_url")
+  externalId     String?            @map("external_id")
+  retrievedAt    DateTime?          @map("retrieved_at")
+  syncStatus     ExternalSyncStatus @default(NOT_SYNCED) @map("sync_status")
+  lastVerifiedAt DateTime?          @map("last_verified_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  programs     Program[]
+  scholarships ScholarshipMaster[]
+  enrollments  Enrollment[]
+
+  @@map("universities")
+}
+
+/// Must belong to exactly one University (FK, never a duplicated university name string).
+/// "Không duplicate Program chỉ vì nhiều application" — Application references this row by
+/// ID, never by (university name, major) text matching.
+model Program {
+  id              String             @id @default(uuid())
+  programCode     String             @unique @map("program_code")
+  universityId    String             @map("university_id")
+  university      University         @relation(fields: [universityId], references: [id])
+  degreeLevel     String             @map("degree_level")
+  major           String
+  intake          String?
+  durationMonths  Int?               @map("duration_months")
+  tuition         Decimal?           @db.Decimal(14, 2)
+  /// Also covers `applicationFee` (Phase 02 design, unchanged) — a program's application
+  /// fee is charged by the same institution in the same currency as its tuition, so a
+  /// separate `applicationFeeCurrency` column would be a redundant near-duplicate; see
+  /// docs/ASSUMPTIONS.md.
+  tuitionCurrency String?            @map("tuition_currency") @db.Char(3)
+  applicationFee  Decimal?           @map("application_fee") @db.Decimal(10, 2)
+  eligibility     String?
+  /// Phase 08 addition — admission/entry requirements text, distinct from `eligibility`
+  /// (who may apply) per 08-admission/01_MASTER_DATA.md's field list.
+  requirements    String?
+  source          String?
+  sourceUrl       String?            @map("source_url")
+  externalId      String?            @map("external_id")
+  retrievedAt     DateTime?          @map("retrieved_at")
+  syncStatus      ExternalSyncStatus @default(NOT_SYNCED) @map("sync_status")
+  status          MasterDataStatus   @default(ACTIVE)
+  lastVerifiedAt  DateTime?          @map("last_verified_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  scholarships      ScholarshipMaster[]
+  applications      Application[]
+  universityChoices UniversityChoice[]
+  enrollments       Enrollment[]
+  /// Phase 10 — optional, one-directional link from PartnerProgram (see PartnerProgram's
+  /// own doc comment); Program itself carries no partner-specific fields.
+  partnerPrograms   PartnerProgram[]
+
+  @@index([universityId])
+  @@map("programs")
+}
+
+/// Master definition only — deliberately separate from `ScholarshipApplication` (a
+/// per-student transaction record below). "Không tạo một ScholarshipMaster mới cho mỗi
+/// student application" — one master row is referenced by many ScholarshipApplication
+/// rows via `scholarshipMasterId`, never copied. May tie to a specific Program OR directly
+/// to a University (a university-wide scholarship with no single Program), per
+/// 08-admission/01_MASTER_DATA.md "program/university" — both FKs nullable, at most a
+/// business-level "usually exactly one is set" convention, not DB-enforced (no CHECK
+/// constraint invented beyond what the instruction file asks for).
+model ScholarshipMaster {
+  id                String             @id @default(uuid())
+  scholarshipCode   String             @unique @map("scholarship_code")
+  provider          String
+  name              String
+  universityId      String?            @map("university_id")
+  university        University?        @relation(fields: [universityId], references: [id])
+  programId         String?            @map("program_id")
+  program           Program?           @relation(fields: [programId], references: [id])
+  eligibility       String?
+  coverageType      String?            @map("coverage_type")
+  amount            Decimal?           @db.Decimal(14, 2)
+  /// Phase 08 addition — some scholarships are percentage-of-tuition rather than a fixed
+  /// amount (08-admission/01_MASTER_DATA.md "amount/percentage"); both are nullable, a
+  /// scholarship uses whichever applies.
+  percentage        Decimal?           @db.Decimal(5, 2)
+  amountCurrency    String?            @map("amount_currency") @db.Char(3)
+  deadline          DateTime?
+  requiredDocuments String?            @map("required_documents")
+  conditions        String?
+  source            String?
+  sourceUrl         String?            @map("source_url")
+  externalId        String?            @map("external_id")
+  retrievedAt       DateTime?          @map("retrieved_at")
+  syncStatus        ExternalSyncStatus @default(NOT_SYNCED) @map("sync_status")
+  status            MasterDataStatus   @default(ACTIVE)
+  lastVerifiedAt    DateTime?          @map("last_verified_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  scholarshipApplications ScholarshipApplication[]
+
+  @@index([universityId])
+  @@index([programId])
+  @@map("scholarship_masters")
+}
+
+enum UniversityChoiceTier {
+  REACH
+  MATCH
+  SAFETY
+}
+
+enum UniversityChoiceStatus {
+  PROPOSED
+  SHORTLISTED
+  CONFIRMED
+  REMOVED
+}
+
+/// 08-admission School Selection — a Student's own shortlist entry, NOT master data
+/// (Reach/Match/Safety is a per-student judgment, never stored on University/Program
+/// themselves — 08-admission/01_MASTER_DATA.md "Không đưa Reach/Match/Safety vào
+/// University hoặc Program master"). `caseId` nullable (a choice can be proposed before a
+/// Case formally exists yet, mirroring `Application.caseId`'s Phase 02 shape before this
+/// phase tightened Application's own — but unlike Application, School Selection routinely
+/// starts during early counseling before Case data is fully wired, so this one stays
+/// optional). One choice per (student, program) — re-proposing the same program is an
+/// edit, not a new row.
+model UniversityChoice {
+  id           String                 @id @default(uuid())
+  studentId    String                 @map("student_id")
+  student      Student                @relation(fields: [studentId], references: [id])
+  caseId       String?                @map("case_id")
+  case         Case?                  @relation(fields: [caseId], references: [id])
+  programId    String                 @map("program_id")
+  program      Program                @relation(fields: [programId], references: [id])
+  tier         UniversityChoiceTier
+  rationale    String?
+  status       UniversityChoiceStatus @default(PROPOSED)
+  ownerId      String?                @map("owner_id")
+  reviewedById String?                @map("reviewed_by_id")
+  reviewedAt   DateTime?              @map("reviewed_at")
+  reviewNotes  String?                @map("review_notes")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
+
+  @@unique([studentId, programId])
+  @@index([caseId])
+  @@map("university_choices")
+}
+
+/// SRS 6.11 — Application is an independent transaction between Student and Program.
+/// Business ID format APP-YYYY-NNNNN. `caseId` is required (Phase 08 tightening of the
+/// Phase 02 foundation-slice shape — 08-admission/02_APPLICATION.md "Application phải
+/// liên kết Student, Case, University, Program"; safe/additive since zero Application rows
+/// existed before this phase — see docs/DECISIONS.md DEC-05). University is reached via
+/// `program.universityId`, never a duplicated direct FK (no duplicate business concept).
+///
+/// Duplicate-active-application prevention (08-admission/02_APPLICATION.md "Prevent
+/// duplicate active applications for the same student/program unless business rule
+/// explicitly allows it") is enforced at the SERVICE layer
+/// (`ApplicationsService.assertNoActiveDuplicate`), not a DB unique constraint — Phase 02's
+/// original `@@unique([studentId, programId])` would have permanently blocked legitimate
+/// reapplication (e.g. after a REJECT, or a new intake cycle) by hard-blocking a second row
+/// forever; relaxed to an index + a status-aware check, same "at most one active X, service-
+/// layer" precedent already used for Case's "at most one non-closed Case per Student." See
+/// docs/DECISIONS.md DEC-05.
+model Application {
+  id                  String            @id @default(uuid())
+  applicationCode     String            @unique @map("application_code")
+  studentId           String            @map("student_id")
+  student             Student           @relation(fields: [studentId], references: [id])
+  caseId              String            @map("case_id")
+  case                Case              @relation(fields: [caseId], references: [id])
+  programId           String            @map("program_id")
+  program             Program           @relation(fields: [programId], references: [id])
+  /// Phase 08 addition — the specific intake this Application targets (free text, e.g.
+  /// "Fall 2026"), distinct from `Program.intake` (the program's general offering
+  /// cadence) — part of the duplicate-application uniqueness combination.
+  intendedIntake      String?           @map("intended_intake")
+  deadline            DateTime?
+  status              ApplicationStatus @default(PLANNING)
+  submittedAt         DateTime?         @map("submitted_at")
+  /// Submission record (08-admission/02_APPLICATION.md) — set once, together, on the
+  /// PLANNING/PREPARING/READY_FOR_REVIEW → SUBMITTED transition; never overwritten by a
+  /// later resubmission of the SAME row (a genuine resubmission is a new Application row,
+  /// per the duplicate-prevention note above).
+  submissionChannel   String?           @map("submission_channel")
+  submissionReference String?           @map("submission_reference")
+  evidenceDocumentId  String?           @map("evidence_document_id")
+  evidenceDocument    Document?         @relation("ApplicationEvidence", fields: [evidenceDocumentId], references: [id])
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  checklist               ApplicationChecklist[]
+  offers                  Offer[]
+  scholarshipApplications ScholarshipApplication[]
+
+  /// Phase 10 — Partners (10-partners/*.md), domain 8's junction/fact tables.
+  partnerStudentLinks    PartnerStudentLink[]
+  commissionTransactions CommissionTransaction[]
+
+  @@index([studentId, programId])
+  @@index([caseId])
+  @@index([status])
+  @@map("applications")
+}
+
+enum ChecklistItemStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  WAIVED
+}
+
+/// 08-admission/02_APPLICATION.md checklist field list. One row per required/optional
+/// item. `documentId` is a real FK into the existing Document subsystem (continuing Phase
+/// 07's ASM-24 precedent) — no separate ApplicationFile/storage model. Mandatory-item
+/// completion is checked server-side before SUBMITTED (`ApplicationsService.submit`), not
+/// just displayed.
+model ApplicationChecklist {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  application   Application         @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  title         String
+  required      Boolean             @default(true)
+  ownerId       String?             @map("owner_id")
+  deadline      DateTime?
+  status        ChecklistItemStatus @default(PENDING)
+  documentId    String?             @map("document_id")
+  document      Document?           @relation("ApplicationChecklistEvidence", fields: [documentId], references: [id])
+  notes         String?
+  completedAt   DateTime?           @map("completed_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  @@index([applicationId])
+  @@map("application_checklist_items")
+}
+
+enum OfferStatus {
+  RECEIVED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+/// Belongs to exactly one Application; an Application may carry multiple Offer rows over
+/// time (08-admission/03_OFFER_SCHOLARSHIP.md "một Application có nhiều offer... không
+/// overwrite offer lịch sử") — a revised/renegotiated offer is a NEW row, the prior one's
+/// row is never edited into it. "Active/current offer" is a computed read (most recent
+/// ACCEPTED, else most recent RECEIVED — `OffersService.getCurrentOffer`), not a stored
+/// flag, same "computed, not synced" precedent as `TasksService.isOverdue`. `offerType` is
+/// free text (Unconditional/Conditional/Deferred/...), same configurable-field precedent
+/// as `WritingArtifact.type`.
+model Offer {
+  id                 String      @id @default(uuid())
+  applicationId      String      @map("application_id")
+  application        Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  offerType          String      @map("offer_type")
+  offerDate          DateTime?   @map("offer_date")
+  acceptanceDeadline DateTime?   @map("acceptance_deadline")
+  depositAmount      Decimal?    @map("deposit_amount") @db.Decimal(14, 2)
+  depositCurrency    String?     @map("deposit_currency") @db.Char(3)
+  isConditional      Boolean     @default(false) @map("is_conditional")
+  conditions         String?
+  status             OfferStatus @default(RECEIVED)
+  respondedAt        DateTime?   @map("responded_at")
+  evidenceDocumentId String?     @map("evidence_document_id")
+  evidenceDocument   Document?   @relation("OfferEvidence", fields: [evidenceDocumentId], references: [id])
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  /// Phase 09 — "xác định rõ Visa/Enrollment đang thuộc enrollment target nào" (09-visa).
+  visas       Visa[]
+  enrollments Enrollment[]
+
+  @@index([applicationId])
+  @@map("offers")
+}
+
+enum ScholarshipApplicationStatus {
+  PLANNING
+  SUBMITTED
+  UNDER_REVIEW
+  INTERVIEW
+  AWARDED
+  REJECTED
+  WITHDRAWN
+}
+
+/// SRS-parallel to Application, but for a scholarship track — kept fully separate from
+/// `ScholarshipMaster` (08-admission/03_OFFER_SCHOLARSHIP.md "Keep ScholarshipMaster
+/// separate from ScholarshipApplication"). `applicationId` optional (a scholarship can be
+/// pursued independently of any specific university Application) — when set, referenced by
+/// FK only, never copying program/university data onto this row (08-admission/03
+/// "không copy toàn bộ program/university data vào ScholarshipApplication"). `essay` reuses
+/// the Phase 07 Writing subsystem (`essayArtifactId` → WritingArtifact) rather than a
+/// duplicate content field. `internalNotes` is staff-only strategy/interview commentary —
+/// field-level redacted from STUDENT_PARENT (`FieldPolicyService.redactScholarshipApplication`),
+/// same pattern as `LetterOfRecommendation.internalNotes`. Award fields are populated once
+/// AWARDED; deliberately never linked to Contract/Payment/Commission (08-admission/03
+/// "Không trộn: scholarship amount / student contract fee / tuition payment / partner
+/// commission").
+model ScholarshipApplication {
+  id                         String                       @id @default(uuid())
+  scholarshipApplicationCode String                       @unique @map("scholarship_application_code")
+  studentId                  String                       @map("student_id")
+  student                    Student                      @relation(fields: [studentId], references: [id])
+  /// Required, not nullable like `UniversityChoice.caseId` — a ScholarshipApplication is a
+  /// counseling-team-tracked transaction from the start, always opened under a Case
+  /// ("Liên kết phù hợp: Student, Case, ScholarshipMaster..." per 08-admission's
+  /// cross-cutting linkage requirement), unlike a University Choice which may be proposed
+  /// during early counseling before a Case formally exists.
+  caseId                     String                       @map("case_id")
+  case                       Case                         @relation(fields: [caseId], references: [id])
+  scholarshipMasterId        String                       @map("scholarship_master_id")
+  scholarshipMaster          ScholarshipMaster            @relation(fields: [scholarshipMasterId], references: [id])
+  applicationId              String?                      @map("application_id")
+  application                Application?                 @relation(fields: [applicationId], references: [id])
+  status                     ScholarshipApplicationStatus @default(PLANNING)
+  eligibilityConfirmed       Boolean                      @default(false) @map("eligibility_confirmed")
+  eligibilityNotes           String?                      @map("eligibility_notes")
+  deadline                   DateTime?
+  essayArtifactId            String?                      @map("essay_artifact_id")
+  essayArtifact              WritingArtifact?             @relation(fields: [essayArtifactId], references: [id])
+  interviewAt                DateTime?                    @map("interview_at")
+  internalNotes              String?                      @map("internal_notes")
+  conditions                 String?
+  awardAmount                Decimal?                     @map("award_amount") @db.Decimal(14, 2)
+  awardCurrency              String?                      @map("award_currency") @db.Char(3)
+  awardCoverageType          String?                      @map("award_coverage_type")
+  awardPeriod                String?                      @map("award_period")
+  awardAcceptanceDeadline    DateTime?                    @map("award_acceptance_deadline")
+  evidenceDocumentId         String?                      @map("evidence_document_id")
+  evidenceDocument           Document?                    @relation("ScholarshipApplicationEvidence", fields: [evidenceDocumentId], references: [id])
+  submittedAt                DateTime?                    @map("submitted_at")
+  decidedAt                  DateTime?                    @map("decided_at")
+  createdAt                  DateTime                     @default(now()) @map("created_at")
+  updatedAt                  DateTime                     @updatedAt @map("updated_at")
+
+  @@index([studentId])
+  @@index([caseId])
+  @@index([scholarshipMasterId])
+  @@index([applicationId])
+  @@map("scholarship_applications")
+}
+
+// ---------------------------------------------------------------------------
+// Visa domain — Visa, VisaChecklistTemplate, VisaChecklistItem, Enrollment
+// (Phase 09 — 09-visa/01_VISA.md, 02_PRE_DEPARTURE_ENROLLMENT.md)
+// ---------------------------------------------------------------------------
+
+/// SRS 6.15 — Not Started/Preparing/Ready/Submitted/Appointment/Interview/Granted/Refused/
+/// Withdrawn, enforced server-side (`VisasService.updateStatus`), never a client-supplied
+/// arbitrary status.
+enum VisaStatus {
+  NOT_STARTED
+  PREPARING
+  READY
+  SUBMITTED
+  APPOINTMENT
+  INTERVIEW
+  GRANTED
+  REFUSED
+  WITHDRAWN
+}
+
+/// Business ID format VISA-YYYY-NNNNN (00-context/00_MASTER_CONTEXT.md). Links Student +
+/// Case (both required — "Không tạo Student/Case mới khi tạo Visa," never a shared row
+/// across multiple cases). `offerId` is the "which enrollment target is this visa for"
+/// reference (09-visa "xác định rõ Visa đang thuộc enrollment target nào") — nullable,
+/// since visa prep routinely starts in parallel with/before an admission outcome is final;
+/// a real FK, never a duplicated University/Program name. At most one non-terminal Visa
+/// per Case is enforced at the service layer (`VisasService.assertNoActiveDuplicate`) —
+/// same "at most one active X" precedent as Application (docs/DECISIONS.md DEC-05) and
+/// Case itself; a Refused/Withdrawn visa's row is never overwritten by a new attempt, a
+/// new attempt is a new row.
+model Visa {
+  id                       String     @id @default(uuid())
+  visaCode                 String     @unique @map("visa_code")
+  studentId                String     @map("student_id")
+  student                  Student    @relation(fields: [studentId], references: [id])
+  caseId                   String     @map("case_id")
+  case                     Case       @relation(fields: [caseId], references: [id])
+  offerId                  String?    @map("offer_id")
+  offer                    Offer?     @relation(fields: [offerId], references: [id])
+  countryCode              String     @map("country_code") @db.Char(2)
+  /// Free text — "Không hard-code danh sách hồ sơ visa cố định," same configurable-field
+  /// precedent as `Application.intendedIntake`/`WritingArtifact.type`.
+  visaType                 String     @map("visa_type")
+  status                   VisaStatus @default(NOT_STARTED)
+  /// Submission record — set together on the READY -> SUBMITTED transition, mirroring
+  /// Application's submission fields (Phase 08).
+  submittedAt              DateTime?  @map("submitted_at")
+  submissionReference      String?    @map("submission_reference")
+  evidenceDocumentId       String?    @map("evidence_document_id")
+  evidenceDocument         Document?  @relation("VisaEvidence", fields: [evidenceDocumentId], references: [id])
+  appointmentAt            DateTime?  @map("appointment_at")
+  appointmentLocation      String?    @map("appointment_location")
+  appointmentReference     String?    @map("appointment_reference")
+  interviewAt              DateTime?  @map("interview_at")
+  /// Interview record — visible to the affected Student/Parent (it is their own
+  /// interview), unlike `internalNotes` below.
+  interviewNotes           String?    @map("interview_notes")
+  resultDate               DateTime?  @map("result_date")
+  resultEvidenceDocumentId String?    @map("result_evidence_document_id")
+  resultEvidenceDocument   Document?  @relation("VisaResultEvidence", fields: [resultEvidenceDocumentId], references: [id])
+  /// Refusal/withdrawal reason — kept on the row, visible to the affected Student/Parent
+  /// (their own outcome); never overwritten across a status change, only ever set once a
+  /// terminal result is recorded. "Withdrawn/Refused phải giữ history và reason."
+  reason                   String?
+  /// Staff-only strategy/internal commentary — field-level redacted from STUDENT_PARENT
+  /// (`FieldPolicyService.redactVisa`), same pattern as LOR/ScholarshipApplication.
+  internalNotes            String?    @map("internal_notes")
+  createdAt                DateTime   @default(now()) @map("created_at")
+  updatedAt                DateTime   @updatedAt @map("updated_at")
+
+  @@index([studentId])
+  @@index([caseId])
+  @@index([offerId])
+  @@map("visas")
+}
+
+/// "Checklist configurable by country + visa type" — master/configuration data, the same
+/// role `TaskTemplate` plays for Task auto-generation: matching active templates are
+/// instantiated into real `VisaChecklistItem` rows when a Visa is created
+/// (`VisasService.create`), idempotently (never re-instantiated on a later read). GLOBAL,
+/// permission-gated only (`visa_checklist_templates` resource), same treatment as
+/// `admission_master` (Phase 08).
+model VisaChecklistTemplate {
+  id          String   @id @default(uuid())
+  countryCode String   @map("country_code") @db.Char(2)
+  visaType    String   @map("visa_type")
+  title       String
+  required    Boolean  @default(true)
+  sortOrder   Int?     @map("sort_order")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([countryCode, visaType, title])
+  @@map("visa_checklist_templates")
+}
+
+/// Serves two parents under the same Visa domain, introduced together this phase —
+/// `entityType = 'Visa'` (`entityId` = a `Visa.id`) and `entityType = 'PreDeparture'`
+/// (`entityId` = a `Case.id`, since pre-departure prep is a Case-level milestone that
+/// outlives any one Visa attempt) — same polymorphic `entityType`/`entityId` pattern
+/// already established for `Comment`/`Approval`/`Document.ownerEntity`, not a new one.
+/// Deliberately NOT merged with Phase 08's `ApplicationChecklist` (an already-PASSed,
+/// Application-only entity — see docs/ASSUMPTIONS.md for why introducing a third
+/// near-identical single-purpose checklist model here, instead of generalizing the
+/// existing one, was the lower-risk choice). Reuses `ChecklistItemStatus` (Phase 08)
+/// unchanged rather than a duplicate enum.
+model VisaChecklistItem {
+  id          String              @id @default(uuid())
+  entityType  String              @map("entity_type")
+  entityId    String              @map("entity_id")
+  title       String
+  /// Free text grouping — for `PreDeparture` items, the suggested passport/visa/flight/
+  /// insurance/accommodation/airport-transfer/orientation/emergency-contact/tuition-
+  /// deposit/travel-documents categories (09-visa/02_PRE_DEPARTURE_ENROLLMENT.md), never a
+  /// hard-coded enum. Nullable — a `Visa`-scoped item has no natural category and leaves
+  /// this unset.
+  category    String?
+  required    Boolean             @default(true)
+  ownerId     String?             @map("owner_id")
+  deadline    DateTime?
+  status      ChecklistItemStatus @default(PENDING)
+  documentId  String?             @map("document_id")
+  document    Document?           @relation("VisaChecklistItemEvidence", fields: [documentId], references: [id])
+  notes       String?
+  completedAt DateTime?           @map("completed_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@index([entityType, entityId])
+  @@map("visa_checklist_items")
+}
+
+enum EnrollmentStatus {
+  PLANNED
+  CONFIRMED
+  WITHDRAWN
+}
+
+/// A Student/Case-level transaction, not master data ("Enrollment là transaction của
+/// Student/Case, không phải master entity"). `offerId` required — an Enrollment must
+/// target a real, ACCEPTED Offer (`EnrollmentsService.create` validates this) — "Không cho
+/// Enrollment target một Offer không hợp lệ." `universityId`/`programId` are real FKs
+/// (reachable via `offer.application.programId` too, but stored directly per
+/// 09-visa/02_PRE_DEPARTURE_ENROLLMENT.md's own field list — "institution, program" —
+/// never a duplicated name string). Multiple Enrollment rows may exist per Case (history
+/// of attempts); at most one CONFIRMED at a time is a service-layer check
+/// (`EnrollmentsService.assertNoActiveConfirmed`), same "at most one active X" precedent
+/// as Visa/Application above.
+model Enrollment {
+  id                 String           @id @default(uuid())
+  studentId          String           @map("student_id")
+  student            Student          @relation(fields: [studentId], references: [id])
+  caseId             String           @map("case_id")
+  case               Case             @relation(fields: [caseId], references: [id])
+  offerId            String           @map("offer_id")
+  offer              Offer            @relation(fields: [offerId], references: [id])
+  universityId       String           @map("university_id")
+  university         University       @relation(fields: [universityId], references: [id])
+  programId          String           @map("program_id")
+  program            Program          @relation(fields: [programId], references: [id])
+  startDate          DateTime?        @map("start_date")
+  confirmationDate   DateTime?        @map("confirmation_date")
+  status             EnrollmentStatus @default(PLANNED)
+  evidenceDocumentId String?          @map("evidence_document_id")
+  evidenceDocument   Document?        @relation("EnrollmentEvidence", fields: [evidenceDocumentId], references: [id])
+  /// Field-level redacted from STUDENT_PARENT — "enrollment internal notes nếu có."
+  internalNotes      String?          @map("internal_notes")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  @@index([studentId])
+  @@index([caseId])
+  @@index([offerId])
+  @@map("enrollments")
+}
+
+// ---------------------------------------------------------------------------
+// Documents domain — Document, DocumentAccess
+// ---------------------------------------------------------------------------
+
+/// SRS 6.19 — metadata is the source of truth; the binary lives in private object storage,
+/// referenced only by `fileReference` (never a public URL — Hard Rule #6, NFR-SEC-04).
+model Document {
+  id                String             @id @default(uuid())
+  documentCode      String             @unique @map("document_code")
+  ownerEntity       String             @map("owner_entity")
+  ownerId           String             @map("owner_id")
+  documentType      String             @map("document_type")
+  title             String
+  version           Int                @default(1)
+  /// Phase 12 — the real, server-generated private-storage object key (never derived from
+  /// the client's original filename, never client-suppliable) once a document is uploaded
+  /// through the real storage pipeline. Column name/shape unchanged from Phase 02-11 (still
+  /// an opaque string) so every existing FK-only caller (evidence/writing/contract/visa/
+  /// partner-document links) is unaffected — only what populates it changed. See
+  /// `docs/ASSUMPTIONS.md` ASM-50.
+  fileReference     String             @map("file_reference")
+  /// Phase 12 — sanitized (path separators/control chars stripped, length-capped) display
+  /// name only, used for the `Content-Disposition` header on download — never the storage
+  /// path. Nullable since pre-Phase-12 rows never had a client-uploaded original name.
+  originalFilename  String?            @map("original_filename")
+  mimeType          String?            @map("mime_type")
+  sizeBytes         BigInt?            @map("size_bytes")
+  checksumSha256    String?            @map("checksum_sha256")
+  status            DocumentStatus     @default(DRAFT)
+  /// Phase 12 — malware-scan lifecycle, independent of `status` (the document's own
+  /// business-workflow state). Download is blocked unless CLEAN. See
+  /// `docs/ASSUMPTIONS.md` ASM-50.
+  scanStatus        DocumentScanStatus @default(PENDING) @map("scan_status")
+  uploadedById      String             @map("uploaded_by_id")
+  uploadedBy        User               @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  uploadedAt        DateTime           @default(now()) @map("uploaded_at")
+  retentionUntil    DateTime?          @map("retention_until")
+  legalHold         Boolean            @default(false) @map("legal_hold")
+  archivedAt        DateTime?          @map("archived_at")
+  /// Phase 12 — "final/submitted/legal files require versioning, không overwrite." A new
+  /// version is always a brand-new Document row pointing back at the one it replaces —
+  /// never an in-place file swap. Self-relation, 1:1 (a version has at most one direct
+  /// predecessor and at most one direct successor), forming a linked-list history chain.
+  previousVersionId String?            @unique @map("previous_version_id")
+  previousVersion   Document?          @relation("DocumentVersionChain", fields: [previousVersionId], references: [id])
+  nextVersion       Document?          @relation("DocumentVersionChain")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  accessGrants DocumentAccess[]
+
+  /// Phase 07 evidence/writing-file back-relations — one named relation per linking model
+  /// (Prisma requires both sides declared); Document itself has no idea which of these a
+  /// given row backs beyond `ownerEntity`/`ownerId`.
+  assessmentCriteriaEvidence      AssessmentCriterion[]    @relation("AssessmentCriterionEvidence")
+  roadmapMilestonesEvidence       RoadmapMilestone[]       @relation("RoadmapMilestoneEvidence")
+  academicRecordsEvidence         AcademicRecord[]         @relation("AcademicRecordEvidence")
+  testRecordsEvidence             TestRecord[]             @relation("TestRecordEvidence")
+  competitionsEvidence            Competition[]            @relation("CompetitionEvidence")
+  researchProjectsEvidence        ResearchProject[]        @relation("ResearchProjectEvidence")
+  activitiesEvidence              Activity[]               @relation("ActivityEvidence")
+  writingVersionFiles             WritingVersion[]         @relation("WritingVersionFile")
+  lettersOfRecommendationEvidence LetterOfRecommendation[] @relation("LetterOfRecommendationEvidence")
+
+  /// Phase 08 evidence back-relations — same one-named-relation-per-linking-model pattern
+  /// as Phase 07 above.
+  applicationsEvidence            Application[]            @relation("ApplicationEvidence")
+  applicationChecklistEvidence    ApplicationChecklist[]   @relation("ApplicationChecklistEvidence")
+  offersEvidence                  Offer[]                  @relation("OfferEvidence")
+  scholarshipApplicationsEvidence ScholarshipApplication[] @relation("ScholarshipApplicationEvidence")
+
+  /// Phase 09 evidence back-relations — same pattern as Phase 07/08 above.
+  visaEvidence          Visa[]              @relation("VisaEvidence")
+  visaResultEvidence    Visa[]              @relation("VisaResultEvidence")
+  visaChecklistEvidence VisaChecklistItem[] @relation("VisaChecklistItemEvidence")
+  enrollmentsEvidence   Enrollment[]        @relation("EnrollmentEvidence")
+
+  /// Phase 10 evidence back-relation — same pattern as Phase 07-09 above.
+  partnerDocumentFiles PartnerDocument[] @relation("PartnerDocumentFile")
+
+  @@index([ownerEntity, ownerId])
+  @@index([status])
+  @@map("documents")
+}
+
+/// Added beyond the required list — see docs/database/DATA_DICTIONARY.md. Backs
+/// server-side, per-principal permission checks before a signed URL is ever issued
+/// (SRS 6.19, 6.21; AC-04).
+model DocumentAccess {
+  id          String                   @id @default(uuid())
+  documentId  String                   @map("document_id")
+  document    Document                 @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  principalId String                   @map("principal_id")
+  principal   User                     @relation("DocumentAccessPrincipal", fields: [principalId], references: [id])
+  permission  DocumentAccessPermission
+  expiresAt   DateTime?                @map("expires_at")
+  createdAt   DateTime                 @default(now()) @map("created_at")
+
+  @@unique([documentId, principalId, permission])
+  /// Phase 14 fix (Final Architect Review) — `DocumentsService.listAccessibleTo` filters by
+  /// `principalId` alone, but the only prior index (`@@unique` above) leads with
+  /// `documentId`, giving that query no index support at all.
+  @@index([principalId, permission])
+  @@map("document_access")
+}
+
+// ---------------------------------------------------------------------------
+// Commercial domain — Contract, ContractTemplate, ContractAmendment, Payment
+// ---------------------------------------------------------------------------
+
+model ContractTemplate {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  version     Int      @default(1)
+  active      Boolean  @default(true)
+  mergeFields Json?    @map("merge_fields")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  contracts Contract[]
+
+  @@map("contract_templates")
+}
+
+/// SRS section 1 — "Một hợp đồng = một Contract ID độc lập với quốc gia/chương trình; sửa
+/// phạm vi hoặc phí phải tạo amendment/version." Business ID format HD-YYYY-NNNNN. Signed
+/// contracts are immutable (Hard Rule #4) — changes go through ContractAmendment.
+model Contract {
+  id                String            @id @default(uuid())
+  contractCode      String            @unique @map("contract_code")
+  studentId         String            @map("student_id")
+  student           Student           @relation(fields: [studentId], references: [id])
+  templateId        String?           @map("template_id")
+  template          ContractTemplate? @relation(fields: [templateId], references: [id])
+  /// Phase 05 — the actual values filled into `template.mergeFields`' schema for THIS
+  /// contract instance (student name, program, fee breakdown, etc.). The template holds
+  /// the field *schema*; this holds this contract's resolved *values* — SRS 6.16 "merge
+  /// fields", `05-commercial/01_CONTRACT.md`.
+  mergeFieldValues  Json?             @map("merge_field_values")
+  servicePackage    String?           @map("service_package")
+  value             Decimal           @db.Decimal(14, 2)
+  currency          String            @db.Char(3)
+  status            ContractStatus    @default(DRAFT)
+  version           Int               @default(1)
+  /// SRS 6.16 "Approval theo monetary threshold; mức vượt ngưỡng phải chuyển GĐĐH" —
+  /// recorded here (not just derived from `.value` at read time) so a later change to the
+  /// configured threshold doesn't retroactively rewrite which rule actually governed a
+  /// past approval decision. Set when the contract is submitted for review.
+  approvalThreshold Decimal?          @map("approval_threshold") @db.Decimal(14, 2)
+  submittedAt       DateTime?         @map("submitted_at")
+  signedAt          DateTime?         @map("signed_at")
+  signedDocumentId  String?           @map("signed_document_id")
+  approvedById      String?           @map("approved_by_id")
+  approvedAt        DateTime?         @map("approved_at")
+  sentAt            DateTime?         @map("sent_at")
+  activatedAt       DateTime?         @map("activated_at")
+  completedAt       DateTime?         @map("completed_at")
+  liquidatedAt      DateTime?         @map("liquidated_at")
+  archivedAt        DateTime?         @map("archived_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  amendments  ContractAmendment[]
+  payments    Payment[]
+  reviewLinks ContractReviewLink[]
+  case        Case?
+
+  @@index([studentId])
+  @@index([status])
+  @@map("contracts")
+}
+
+/// SRS 6.16 "Gửi client review bằng secure link có expiry; signed document lưu
+/// immutable" — a single-purpose, short-lived, token-gated link so a client (who may not
+/// even have a portal login yet — the Lead→Student chain doesn't require one, see
+/// docs/ASSUMPTIONS.md ASM-05) can review contract terms before signing, without exposing
+/// a permanent public URL (Hard Rule #6). Same shape as `PasswordResetToken` /
+/// `IdempotencyKey` — opaque token, only its hash stored.
+model ContractReviewLink {
+  id         String    @id @default(uuid())
+  contractId String    @map("contract_id")
+  contract   Contract  @relation(fields: [contractId], references: [id])
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  viewedAt   DateTime? @map("viewed_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([contractId])
+  @@map("contract_review_links")
+}
+
+/// Business ID format AM-YYYY-NNNNN. "Amendment phải giữ lịch sử version trước/sau"
+/// (05-commercial business rule #12) — `previousVersion`/`newVersion` alone only say
+/// *that* something changed; `before`/`after` capture *what* (value/currency/
+/// servicePackage/mergeFieldValues), mirroring the same before/after-snapshot pattern
+/// `AuditLog` already uses for EDIT actions.
+model ContractAmendment {
+  id              String   @id @default(uuid())
+  amendmentCode   String   @unique @map("amendment_code")
+  contractId      String   @map("contract_id")
+  contract        Contract @relation(fields: [contractId], references: [id])
+  previousVersion Int      @map("previous_version")
+  newVersion      Int      @map("new_version")
+  before          Json?
+  after           Json?
+  reason          String
+  approvedById    String?  @map("approved_by_id")
+  effectiveDate   DateTime @map("effective_date")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([contractId])
+  @@map("contract_amendments")
+}
+
+/// SRS 6.16 — supports multiple installments, partial payment, overdue detection.
+/// Business ID format PAY-YYYY-NNNNN. "Student Payment KHÔNG PHẢI Partner Commission" —
+/// this table only ever represents money a Student/family owes/pays this org; commission
+/// is `CommissionTransaction` (Phase 10, not touched here — see
+/// docs/ASSUMPTIONS.md ASM-13).
+model Payment {
+  id                String        @id @default(uuid())
+  paymentCode       String        @unique @map("payment_code")
+  contractId        String        @map("contract_id")
+  contract          Contract      @relation(fields: [contractId], references: [id])
+  installmentNo     Int           @map("installment_no")
+  amount            Decimal       @db.Decimal(14, 2)
+  currency          String        @db.Char(3)
+  dueDate           DateTime      @map("due_date")
+  paidAmount        Decimal       @default(0) @map("paid_amount") @db.Decimal(14, 2)
+  paidDate          DateTime?     @map("paid_date")
+  method            String?
+  /// Business-rule duplicate check (05-commercial rule #4): globally unique when set.
+  /// Postgres unique indexes treat every NULL as distinct, so any number of
+  /// not-yet-recorded (reference IS NULL) payments coexist fine — only an attempt to
+  /// reuse the same non-null reference twice is rejected.
+  reference         String?       @unique
+  status            PaymentStatus @default(PENDING)
+  /// Phase 05 addition — `05-commercial/02_PAYMENT.md` field list. Same "string
+  /// reference, not FK" pattern as `Contract.signedDocumentId` (docs/ASSUMPTIONS.md
+  /// ASM-02) — no Document controller exists yet (Phase 12).
+  receiptDocumentId String?       @map("receipt_document_id")
+  /// Refund fields — 05-commercial rule #7 "Refund phải có liên kết tới payment gốc":
+  /// the refund is recorded ON the original Payment row rather than a separate
+  /// transaction row, so the "link to the original payment" is the strongest possible
+  /// one (identity, not a join) — see docs/ASSUMPTIONS.md ASM-14. Supports partial
+  /// refund: `refundedAmount` can be less than `paidAmount`.
+  refundedAmount    Decimal       @default(0) @map("refunded_amount") @db.Decimal(14, 2)
+  refundedAt        DateTime?     @map("refunded_at")
+  refundedById      String?       @map("refunded_by_id")
+  refundReason      String?       @map("refund_reason")
+  /// Waiver fields — 05-commercial rule #8 "Waived phải có reason và audit."
+  waivedAt          DateTime?     @map("waived_at")
+  waivedById        String?       @map("waived_by_id")
+  waivedReason      String?       @map("waived_reason")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  @@unique([contractId, installmentNo])
+  @@index([status])
+  @@index([dueDate])
+  @@map("payments")
+}
+
+// ---------------------------------------------------------------------------
+// Partners domain (foundation slice) — Partner, PartnerProgram, PartnerDocument
+// ---------------------------------------------------------------------------
+
+/// SRS section 1 — "Một đối tác = một Partner ID; một đối tác có thể có nhiều Partner
+/// Program." Business ID format PT-CC-NNNNN. `internalNotes` — Phase 10 addition
+/// (10-partners/01_PARTNER_CRM.md's cross-cutting "internal partner notes phải được
+/// field-level protection"), field-level redacted from DOCUMENT_SPECIALIST
+/// (`FieldPolicyService.redactPartner`), the only granted role without full commercial
+/// visibility — see docs/ASSUMPTIONS.md ASM-43. `contactPhone` — Phase 10 addition,
+/// completing "contacts" (name/email/phone) alongside the Phase 02 contactName/
+/// contactEmail pair; not a multi-contact sub-entity (docs/ASSUMPTIONS.md ASM-40).
+model Partner {
+  id            String           @id @default(uuid())
+  partnerCode   String           @unique @map("partner_code")
+  name          String
+  type          PartnerType
+  countryCode   String           @map("country_code") @db.Char(2)
+  contactName   String?          @map("contact_name")
+  contactEmail  String?          @map("contact_email")
+  contactPhone  String?          @map("contact_phone")
+  website       String?
+  ownerId       String?          @map("owner_id")
+  internalNotes String?          @map("internal_notes")
+  status        MasterDataStatus @default(ACTIVE)
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  programs               PartnerProgram[]
+  documents              PartnerDocument[]
+  studentLinks           PartnerStudentLink[]
+  commissionRules        CommissionRule[]
+  commissionTransactions CommissionTransaction[]
+
+  @@map("partners")
+}
+
+/// Business ID format PP-CC-NNNNN-NN. `programId` — Phase 10 addition, an OPTIONAL link to
+/// the existing Admission-domain `Program` master row when a partner's program genuinely
+/// corresponds to one (never a duplicated University/Program row in this module); left
+/// null when the partner program is purely the partner's own commercial/admission mapping
+/// with no catalog equivalent — docs/architecture/DOMAIN_MAP.md domain 8's own noted gap
+/// (REPOSITORY_AUDIT 5.6), resolved here as an additive, one-directional, nullable FK — see
+/// docs/ASSUMPTIONS.md ASM-41.
+model PartnerProgram {
+  id                 String           @id @default(uuid())
+  partnerProgramCode String           @unique @map("partner_program_code")
+  partnerId          String           @map("partner_id")
+  partner            Partner          @relation(fields: [partnerId], references: [id])
+  programId          String?          @map("program_id")
+  program            Program?         @relation(fields: [programId], references: [id])
+  name               String
+  degreeLevel        String?          @map("degree_level")
+  major              String?
+  intake             String?
+  tuition            Decimal?         @db.Decimal(14, 2)
+  tuitionCurrency    String?          @map("tuition_currency") @db.Char(3)
+  scholarshipInfo    String?          @map("scholarship_info")
+  admissionsRule     String?          @map("admissions_rule")
+  status             MasterDataStatus @default(ACTIVE)
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  commissionRules CommissionRule[]
+
+  @@index([partnerId])
+  @@index([programId])
+  @@map("partner_programs")
+}
+
+/// SRS 6.17 — MOU/Agreement/Commission Agreement/rate sheet, versioned with
+/// effective/expiry dates. Phase 10 rebuilds the file-linkage half of this model: the
+/// Phase 02 `fileReference` string column (never used by any service — no PartnerDocument
+/// controller existed before this phase) is replaced by a real FK into the existing
+/// Document subsystem (`documentId`, same ASM-24 precedent as every Phase 07-09 evidence
+/// field) — "PartnerDocument phải sử dụng Document subsystem hiện tại... không tạo storage
+/// mới." `status`/`ownerId` are new columns needed for the immutable-once-signed lifecycle
+/// this phase implements (`PartnerDocumentStatus`) — see docs/ASSUMPTIONS.md ASM-42.
+model PartnerDocument {
+  id            String                @id @default(uuid())
+  partnerId     String                @map("partner_id")
+  partner       Partner               @relation(fields: [partnerId], references: [id])
+  type          PartnerDocumentType
+  version       Int                   @default(1)
+  status        PartnerDocumentStatus @default(DRAFT)
+  effectiveDate DateTime?             @map("effective_date")
+  expiryDate    DateTime?             @map("expiry_date")
+  documentId    String?               @map("document_id")
+  document      Document?             @relation("PartnerDocumentFile", fields: [documentId], references: [id])
+  ownerId       String?               @map("owner_id")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+
+  @@unique([partnerId, type, version])
+  @@index([partnerId])
+  @@map("partner_documents")
+}
+
+/// Phase 10 — SRS 6.17 "liên kết nhiều student/case/application bằng bảng trung gian" (a
+/// junction table, never a duplicate Student/Case/Application/Partner). `caseId`/
+/// `applicationId` are both nullable — a link may be as broad as partner+student, or as
+/// specific as partner+student+case+application, per whatever the originating business
+/// event actually knew. No business-ID format is defined for this entity in
+/// 00-context/00_MASTER_CONTEXT.md's ID table — plain UUID, same "sub-record, no format
+/// needed" precedent as VisaChecklistItem/Enrollment (ASM-26/34).
+model PartnerStudentLink {
+  id            String            @id @default(uuid())
+  partnerId     String            @map("partner_id")
+  partner       Partner           @relation(fields: [partnerId], references: [id])
+  studentId     String            @map("student_id")
+  student       Student           @relation(fields: [studentId], references: [id])
+  caseId        String?           @map("case_id")
+  case          Case?             @relation(fields: [caseId], references: [id])
+  applicationId String?           @map("application_id")
+  application   Application?      @relation(fields: [applicationId], references: [id])
+  /// Free text (Referral/Agent/Sponsor/...) — configurable, never a hard-coded enum, same
+  /// precedent as `Visa.visaType`/`Offer.offerType`.
+  linkType      String            @map("link_type")
+  status        PartnerLinkStatus @default(ACTIVE)
+  effectiveDate DateTime?         @map("effective_date")
+  endDate       DateTime?         @map("end_date")
+  notes         String?
+  createdById   String?           @map("created_by_id")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  @@index([partnerId])
+  @@index([studentId])
+  @@index([caseId])
+  @@map("partner_student_links")
+}
+
+/// Phase 10 — deliberately separate from `CommissionTransaction` (the rule is config, the
+/// transaction is a fact that happened) and from `Payment`/`Contract.value`/
+/// `ScholarshipApplication.awardAmount` (SRS 6.17 "Commission phải tách khỏi student
+/// payment" — Hard Rule, no shared FK/column with any of those three anywhere). `basis`
+/// determines both what `percentageRate` is a percentage OF and whether `fixedAmount`
+/// applies instead — see the `CommissionBasis` enum comment. `partnerProgramId` null means
+/// a partner-wide rule; set means scoped to one specific PartnerProgram. `priority` +
+/// specificity (partnerProgramId set beats null) give deterministic precedence when
+/// multiple active rules could match the same transaction — docs/ASSUMPTIONS.md ASM-44.
+/// No business-ID format defined — plain UUID, same "config/template data" precedent as
+/// `TaskTemplate`/`ContractTemplate`/`VisaChecklistTemplate` (none of which got an invented
+/// code either).
+model CommissionRule {
+  id               String           @id @default(uuid())
+  partnerId        String           @map("partner_id")
+  partner          Partner          @relation(fields: [partnerId], references: [id])
+  partnerProgramId String?          @map("partner_program_id")
+  partnerProgram   PartnerProgram?  @relation(fields: [partnerProgramId], references: [id])
+  basis            CommissionBasis
+  /// Fraction, not a percent-number — 0.1000 = 10%. Required when basis is
+  /// CONTRACT_VALUE/PAYMENT_COLLECTED, null when basis = FIXED.
+  percentageRate   Decimal?         @map("percentage_rate") @db.Decimal(7, 4)
+  /// Required when basis = FIXED, null otherwise.
+  fixedAmount      Decimal?         @map("fixed_amount") @db.Decimal(14, 2)
+  currency         String           @db.Char(3)
+  conditions       String?
+  priority         Int              @default(0)
+  effectiveDate    DateTime?        @map("effective_date")
+  expiryDate       DateTime?        @map("expiry_date")
+  status           MasterDataStatus @default(ACTIVE)
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  transactions CommissionTransaction[]
+
+  @@index([partnerId, partnerProgramId, status])
+  @@map("commission_rules")
+}
+
+/// Phase 10 — the actual financial fact. `basis`/`basisAmount`/`rate`/`calculatedAmount`/
+/// `currency` are SNAPSHOTTED at `calculate()` time from whichever `CommissionRule` was
+/// matched (same "snapshot at point of use" precedent as `Contract.approvalThreshold`) —
+/// so a later edit to the rule never rewrites a transaction's own history. `sourceType`/
+/// `sourceId` are polymorphic (same pattern as `Document.ownerEntity`/`ownerId`) —
+/// `sourceType='Contract'` or `'Payment'`, the two bases this phase implements; the
+/// underlying amount is always read live from that Contract/Payment row, never a duplicate
+/// outstanding/paid calculation. `studentId`/`caseId`/`applicationId` are all nullable
+/// convenience FKs, populated when resolvable from the source, never required. PAID and
+/// CANCELLED are both terminal — no adjustment/reversal mechanism exists (not named
+/// anywhere in 10-partners/01_PARTNER_CRM.md) — see docs/ASSUMPTIONS.md ASM-45 and the
+/// corresponding RISK entry in docs/phase-status/PHASE_10.md. No business-ID format
+/// defined — plain UUID.
+model CommissionTransaction {
+  id               String                      @id @default(uuid())
+  partnerId        String                      @map("partner_id")
+  partner          Partner                     @relation(fields: [partnerId], references: [id])
+  commissionRuleId String?                     @map("commission_rule_id")
+  commissionRule   CommissionRule?             @relation(fields: [commissionRuleId], references: [id])
+  studentId        String?                     @map("student_id")
+  student          Student?                    @relation(fields: [studentId], references: [id])
+  caseId           String?                     @map("case_id")
+  case             Case?                       @relation(fields: [caseId], references: [id])
+  applicationId    String?                     @map("application_id")
+  application      Application?                @relation(fields: [applicationId], references: [id])
+  sourceType       String                      @map("source_type")
+  sourceId         String?                     @map("source_id")
+  basis            CommissionBasis?
+  basisAmount      Decimal?                    @map("basis_amount") @db.Decimal(14, 2)
+  rate             Decimal?                    @db.Decimal(7, 4)
+  calculatedAmount Decimal?                    @map("calculated_amount") @db.Decimal(14, 2)
+  currency         String                      @db.Char(3)
+  status           CommissionTransactionStatus @default(PENDING)
+  paidAt           DateTime?                   @map("paid_at")
+  paymentReference String?                     @map("payment_reference")
+  reason           String?
+  createdAt        DateTime                    @default(now()) @map("created_at")
+  updatedAt        DateTime                    @updatedAt @map("updated_at")
+
+  @@index([partnerId])
+  @@index([status])
+  @@index([sourceType, sourceId])
+  @@map("commission_transactions")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications domain — Notification, Comment, Approval
+// ---------------------------------------------------------------------------
+
+/// SRS 6.20. `dedupeKey` is Phase 06's dedication mechanism against "cùng event xử lý
+/// lại / API retry / duplicate queue message" (06-operations/02_NOTIFICATION.md "Prevent
+/// duplicate sends") — same nullable-`@unique` NULL-semantics pattern already used by
+/// `Payment.reference`/`ContractReviewLink.tokenHash`: a caller-supplied key like
+/// `task-deadline:{taskId}:{offsetDays}:{channel}` makes re-firing the same logical event
+/// a no-op (`upsert`), while a one-off notification with no natural dedup key can still
+/// pass `null` and always create a fresh row.
+model Notification {
+  id          String              @id @default(uuid())
+  recipientId String              @map("recipient_id")
+  recipient   User                @relation(fields: [recipientId], references: [id])
+  event       String
+  channel     NotificationChannel
+  payload     Json?
+  dedupeKey   String?             @unique @map("dedupe_key")
+  sentAt      DateTime?           @map("sent_at")
+  readAt      DateTime?           @map("read_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  @@index([recipientId])
+  @@index([sentAt])
+  @@map("notifications")
+}
+
+/// Polymorphic per SRS 6.21 ("entity_type/id"). `visibility` supports internal-only notes
+/// vs notes visible to student/parent (SRS field-level rules, section 13).
+model Comment {
+  id         String   @id @default(uuid())
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  authorId   String   @map("author_id")
+  author     User     @relation(fields: [authorId], references: [id])
+  body       String
+  visibility String   @default("internal")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@map("comments")
+}
+
+/// Used for contract approval (SRS 6.16), roadmap approval (SRS 6.5), etc. — a single
+/// shared model rather than a per-domain duplicate (see docs/architecture/DOMAIN_MAP.md
+/// domain 10, `notifications` owns Approval).
+model Approval {
+  id         String           @id @default(uuid())
+  entityType String           @map("entity_type")
+  entityId   String           @map("entity_id")
+  approverId String           @map("approver_id")
+  approver   User             @relation("ApprovalDecidedBy", fields: [approverId], references: [id])
+  decision   ApprovalDecision @default(PENDING)
+  reason     String?
+  decidedAt  DateTime?        @map("decided_at")
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@map("approvals")
+}
+
+// ---------------------------------------------------------------------------
+// Identity domain — AuditLog (append-only; see docs/api/API_CONVENTIONS.md audit hook)
+// ---------------------------------------------------------------------------
+
+/// SRS section 1, 6.21 — audit trail for VIEW/EDIT/DOWNLOAD/EXPORT/SHARE/DELETE/LOGIN.
+/// Append-only: no updatedAt, no soft-delete field, no update/delete path is exposed by
+/// the API (Hard Rule #5, NFR-SEC-05).
+model AuditLog {
+  id             String   @id @default(uuid())
+  actorId        String?  @map("actor_id")
+  actor          User?    @relation(fields: [actorId], references: [id])
+  action         String
+  objectType     String   @map("object_type")
+  objectId       String?  @map("object_id")
+  studentId      String?  @map("student_id")
+  caseId         String?  @map("case_id")
+  result         String
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  beforeSnapshot Json?    @map("before_snapshot")
+  afterSnapshot  Json?    @map("after_snapshot")
+  /// 03-security/03_AUDIT.md "metadata" — freeform, action-specific context that doesn't
+  /// fit before/after (SRS 6.21 export: reason, filter scope, row count, fields exported).
+  metadata       Json?
+  requestId      String?  @map("request_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([objectType, objectId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Cross-cutting infra (not a business entity) — Idempotency
+// ---------------------------------------------------------------------------
+
+/// Backs the idempotency strategy required by 02-foundation/02_API_FOUNDATION.md for
+/// transaction-sensitive endpoints (e.g. POST /contracts/from-template). Not part of the
+/// 40 core business entities — see docs/database/DATA_DICTIONARY.md.
+/// Backs the centralized business-ID generator (common/id) so every module gets SRS
+/// section 8 codes from one place instead of each module inventing its own counter —
+/// required by 01_DATABASE_FOUNDATION.md rule "business IDs immutable" and flagged as a
+/// migration risk in docs/REPOSITORY_AUDIT.md section 8. `bucket` is generic on purpose:
+/// a 4-digit year for `HS-YYYY-NNNNN`-style codes, or a country code for `PT-CC-NNNNN`-
+/// style codes — whatever the format's second segment is. `lastValue` is incremented
+/// inside a serializable transaction (SELECT ... FOR UPDATE). Not a business entity — see
+/// docs/database/DATA_DICTIONARY.md.
+model BusinessIdSequence {
+  prefix    String
+  bucket    String
+  lastValue Int      @default(0) @map("last_value")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([prefix, bucket])
+  @@map("business_id_sequences")
+}
+
+model IdempotencyKey {
+  id           String   @id @default(uuid())
+  key          String   @unique
+  requestPath  String   @map("request_path")
+  requestHash  String   @map("request_hash")
+  responseBody Json?    @map("response_body")
+  createdAt    DateTime @default(now()) @map("created_at")
+  expiresAt    DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+/// Phase 12 (12-platform/02_INTEGRATIONS_JOBS.md) — the DB-backed job queue backing
+/// document scanning, reminder sweeps, notification (email) dispatch, and external sync.
+/// Not a business entity — same cross-cutting-infra taxonomy as `BusinessIdSequence`/
+/// `IdempotencyKey` above. `dedupeKey` (nullable, unique) is the idempotency mechanism —
+/// `JobsService.enqueue` upserts on it, so retrying the same logical trigger (a repeated
+/// event, a re-run scheduler tick) never creates a second job. See
+/// `docs/ASSUMPTIONS.md` ASM-52 for why this is a DB table + in-process poller rather than
+/// Redis/BullMQ (revising the Phase 06 ASM-18 note that had named the latter).
+model BackgroundJob {
+  id            String              @id @default(uuid())
+  jobType       String              @map("job_type")
+  payload       Json
+  dedupeKey     String?             @unique @map("dedupe_key")
+  status        BackgroundJobStatus @default(PENDING)
+  attempts      Int                 @default(0)
+  maxAttempts   Int                 @default(5) @map("max_attempts")
+  lastError     String?             @map("last_error")
+  correlationId String?             @map("correlation_id")
+  scheduledFor  DateTime            @default(now()) @map("scheduled_for")
+  startedAt     DateTime?           @map("started_at")
+  completedAt   DateTime?           @map("completed_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  @@index([status, scheduledFor])
+  @@index([jobType])
+  @@map("background_jobs")
+}
+
+enum BackgroundJobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// Phase 12 — generic, reusable incoming-webhook receipt log. `(source, eventId)` unique
+/// constraint IS the replay-protection/idempotency mechanism (SRS-adjacent "event ID
+/// storage"), checked BEFORE any business-data mutation is attempted — a replayed or
+/// duplicated webhook delivery is recognized and short-circuited at the DB level, not by
+/// re-running handler logic and hoping it's idempotent. `signatureValid` records the
+/// verification outcome even for a rejected event (so a forged-signature attempt is still
+/// auditable, not silently dropped). See `docs/ASSUMPTIONS.md` ASM-53.
+model IncomingWebhookEvent {
+  id             String             @id @default(uuid())
+  source         String
+  eventId        String             @map("event_id")
+  signatureValid Boolean            @map("signature_valid")
+  status         WebhookEventStatus @default(RECEIVED)
+  payload        Json
+  receivedAt     DateTime           @default(now()) @map("received_at")
+  processedAt    DateTime?          @map("processed_at")
+
+  @@unique([source, eventId])
+  @@map("incoming_webhook_events")
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  REJECTED
+}

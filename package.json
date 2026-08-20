@@ -1,0 +1,33 @@
+{
+  "name": "abroad-scholarship-system",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "db:generate": "prisma generate --schema=database/schema.prisma",
+    "db:migrate:dev": "prisma migrate dev --schema=database/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema=database/schema.prisma",
+    "db:migrate:status": "prisma migrate status --schema=database/schema.prisma",
+    "db:seed": "prisma db seed --schema=database/schema.prisma",
+    "api:build": "npm run build -w apps/api",
+    "api:start": "npm run start -w apps/api",
+    "api:typecheck": "npm run typecheck -w apps/api",
+    "api:lint": "npm run lint -w apps/api",
+    "api:test": "npm run test -w apps/api",
+    "api:test:e2e": "npm run test:e2e -w apps/api"
+  },
+  "prisma": {
+    "schema": "database/schema.prisma",
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} database/seeds/seed.ts"
+  },
+  "devDependencies": {
+    "prisma": "6.19.3",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3"
+  }
+}
