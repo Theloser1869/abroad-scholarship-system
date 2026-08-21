@@ -1565,3 +1565,37 @@ explicitly named as a **production blocker** — see `docs/phase-status/PHASE_14
 release-readiness classification — not silently treated as already handled.
 **Affected modules**: none in this repository; a real deployment's infrastructure/ops
 tooling.
+
+## ASM-62 — Payment detail and Milestone management are Dialogs, not standalone routes (Phase F04)
+
+**Date**: 2026-08-21
+**Context**: F04's instructions ask for "Payment detail" and milestone create/edit/status/
+dependency management, but `docs/frontend/FRONTEND_ROUTES.md` (F01's route plan) never maps a
+`/payments/[id]` or `/milestones/[id]` route — only `/contracts/[id]/payments` (installment
+list) and `/roadmaps/[id]` (which embeds `.milestones`) are mapped.
+**Decision**: Built Payment detail/record/refund/waive and Milestone create/edit/status/
+add-dependency as Dialogs launched from their parent list/detail page, never as new routes.
+**Reason**: Per this project's standing rule ("không tự tạo route ngoài F01's mapped set"),
+inventing a route F01 didn't plan would be scope creep even though the underlying backend
+endpoints (`GET /payments/:id`, `GET/PATCH /milestones/:id`) are real; a Dialog satisfies the
+functional requirement (view/edit the record) without inventing navigation structure.
+**Affected modules**: `apps/web/components/crm/payments/payment-detail-dialog.tsx`,
+`apps/web/components/crm/roadmaps/{milestone-form-dialog,milestone-status-dialog,
+milestone-dependency-dialog}.tsx`.
+
+## ASM-63 — LOR tracking has no dedicated route (Phase F04)
+
+**Date**: 2026-08-21
+**Context**: F04's Writing checklist lists "LOR tracking" as one bullet among artifact list/
+editor/version/review/final-state, not as its own feature area with its own route; F01's route
+plan never mapped a `/letters-of-recommendation` (or similar) route either.
+**Decision**: Built LOR (recommender/contact/deadline/request-status/submission-status
+tracking, backed by the real `GET/POST /cases/:caseId/letters-of-recommendation` and
+`GET/PATCH /letters-of-recommendation/:id` endpoints) as a card on the existing Writing
+artifact list page (`/cases/[caseId]/writing-artifacts`), not a new route.
+**Reason**: Consistent with ASM-62's reasoning — the backend feature is real and was built, but
+without inventing a route structure F01 never planned. Grouping it with Writing artifacts also
+matches the F04 instruction's own placement (LOR is listed under the WRITING section, not as a
+sibling top-level area).
+**Affected modules**: `apps/web/lib/lor/**`, `apps/web/components/crm/writing/
+lor-form-dialog.tsx`, `apps/web/app/(staff)/cases/[caseId]/writing-artifacts/page.tsx`.

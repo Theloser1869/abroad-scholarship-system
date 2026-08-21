@@ -103,6 +103,65 @@ describe('Case management (e2e)', () => {
     });
   });
 
+  /// Phase F03 (frontend CRM) fix regression: `GET /cases` previously returned bare
+  /// `studentId`/`ownerId` with no `studentId` filter at all — both added so the frontend's
+  /// Student 360 view and Case list can work without an N+1 fetch or a full-table client
+  /// scan (see `docs/DECISIONS.md`).
+  describe('GET /cases — studentId filter + student/owner relation summaries (Phase F03 fix)', () => {
+    it('includes a display-safe student/owner summary on both list and detail, never the full User row', async () => {
+      const studentId = await createStandaloneStudent();
+      const created = await request(app.getHttpServer())
+        .post(`/students/${studentId}/cases`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({});
+
+      const detail = await request(app.getHttpServer()).get(`/cases/${created.body.id}`).set('Authorization', `Bearer ${managerToken}`);
+      expect(detail.status).toBe(200);
+      expect(detail.body.student).toMatchObject({ id: studentId });
+      expect(detail.body.student).toHaveProperty('fullName');
+      expect(detail.body.owner).toHaveProperty('fullName');
+      expect(detail.body.owner).not.toHaveProperty('passwordHash');
+
+      const list = await request(app.getHttpServer())
+        .get('/cases')
+        .query({ studentId })
+        .set('Authorization', `Bearer ${managerToken}`);
+      expect(list.status).toBe(200);
+      expect(list.body.data).toHaveLength(1);
+      expect(list.body.data[0].id).toBe(created.body.id);
+      expect(list.body.data[0].student.fullName).toBeDefined();
+    });
+
+    it('the studentId filter never bypasses scope — a non-member still sees zero rows for that student', async () => {
+      const studentId = await createStandaloneStudent();
+      await request(app.getHttpServer())
+        .post(`/students/${studentId}/cases`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({});
+
+      const asOutsider = await request(app.getHttpServer())
+        .get('/cases')
+        .query({ studentId })
+        .set('Authorization', `Bearer ${consultantBToken}`); // not a member of this new case
+      expect(asOutsider.status).toBe(200);
+      expect(asOutsider.body.data).toHaveLength(0);
+    });
+
+    it('GET /cases/:id/members includes a display-safe user summary per member, never the full User row', async () => {
+      const studentId = await createStandaloneStudent();
+      const created = await request(app.getHttpServer())
+        .post(`/students/${studentId}/cases`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({});
+
+      const members = await request(app.getHttpServer()).get(`/cases/${created.body.id}/members`).set('Authorization', `Bearer ${managerToken}`);
+      expect(members.status).toBe(200);
+      expect(members.body).toHaveLength(1);
+      expect(members.body[0].user).toHaveProperty('fullName');
+      expect(members.body[0].user).not.toHaveProperty('passwordHash');
+    });
+  });
+
   describe('stage and status transitions', () => {
     it('updates the (free-text, configurable) stage', async () => {
       const studentId = await createStandaloneStudent();

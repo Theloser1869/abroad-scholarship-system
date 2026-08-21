@@ -135,7 +135,11 @@ export class FieldPolicyService {
     return true;
   }
 
-  redactContract(contract: Contract, roleCode: string): RedactedContract {
+  /// Generic over `T extends Contract` (not just the bare `Contract` type) so a caller
+  /// passing `ContractWithStudent` (DEC-10 — `student` relation summary, additive to the
+  /// list/detail endpoints) keeps that field in the redacted result's type, instead of it
+  /// being silently widened away to plain `Contract` by a non-generic signature.
+  redactContract<T extends Contract>(contract: T, roleCode: string): Omit<T, 'value' | 'currency' | 'approvalThreshold'> & Pick<RedactedContract, 'value' | 'currency' | 'approvalThreshold'> {
     if (!FINANCIAL_REDACTED_FOR.has(roleCode as RoleCode)) {
       return contract;
     }

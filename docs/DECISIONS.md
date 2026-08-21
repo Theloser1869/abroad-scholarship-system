@@ -240,3 +240,158 @@ lists both children for that one account. Full regression re-run clean: 372 e2e 
 01-10 unchanged) + 30 new Phase 11 e2e (`portal.e2e-spec.ts`), 402 total — see
 `docs/phase-status/PHASE_11.md`; 163 unit (2 `scope-policy.service.spec.ts` tests updated +
 2 added for the paired revocation-awareness fix).
+
+---
+
+## DEC-07 — Frontend stack: Next.js 16 (App Router) + Tailwind CSS v4, one `apps/web` app with two route-group surfaces (Phase F01)
+
+**ID**: DEC-07
+**Context**: `docs/architecture/TARGET_ARCHITECTURE.md` §1 already fixed "React/Next.js,
+TypeScript" and "một ứng dụng web duy nhất (`apps/web`)... Portal... một surface riêng trong
+cùng app" as architectural constraints during the backend phases. Phase F01
+(`frontend_prompts/01-foundation/01_FRONTEND_AUDIT_ARCHITECTURE.md`) needed to turn that into
+a concrete, buildable stack: exact Next.js version/router, styling system, and how the
+staff/portal surface split is actually implemented.
+**Options**:
+1. Pages Router (Next.js's older model) — more training-data-familiar, but loses built-in
+   nested layouts, which the staff-vs-portal shell split needs.
+2. App Router, two separate root layouts (one per surface) via route groups.
+3. App Router, one shared root layout + two route groups (`(staff)`, `(portal)`) as nested
+   (non-root) layouts.
+**Decision**: App Router, option 3. Styling: Tailwind CSS v4 (the current `create-next-app`
+default for this Next.js version), no component library (Radix/shadcn/MUI) installed at
+scaffold time.
+**Reason**: Option 1 forgoes the exact nested-layout mechanism the surface split is built on.
+Option 2 is technically workable but triggers Next.js's "multiple root layouts → full page
+reload between them" behavior for two surfaces that share the same origin, auth cookie, and
+design tokens — no benefit, real cost. Tailwind v4 was kept as-is rather than swapped for
+plain CSS Modules or a second system, per this phase's own "chọn một solution nhất quán...
+không tạo nhiều styling systems" instruction; a component library was deliberately deferred
+(F01 instruction: "tránh dependency thừa... không cài toàn bộ UI ecosystem chỉ để scaffold")
+since no page yet needs one beyond the four hand-built primitives (`components/ui/`).
+**Impact**: `apps/web/app/layout.tsx` is the only root layout (`<html>`/`<body>`/fonts/
+`AppProviders`); `app/(staff)/layout.tsx` and `app/(portal)/portal/layout.tsx` are ordinary
+nested layouts. Next.js 16 is new enough that two documented pre-16 conventions changed and
+had to be corrected during this phase (verified against `node_modules/next/dist/docs/`, not
+assumed from training data): `error.tsx`'s recovery callback prop is `retry`, not `reset`;
+the `middleware.ts` file convention is deprecated in favor of `proxy.ts` (identical shape,
+renamed file/export) — `apps/web/proxy.ts` uses the new name. A future Next.js major-version
+upgrade should re-check that directory again before assuming either convention is still
+current.
+
+---
+
+## DEC-08 — Server-state library chosen (TanStack Query) but not installed until F02 (Phase F01)
+
+**ID**: DEC-08
+**Context**: `frontend_prompts/00-context/00_FRONTEND_MASTER_CONTEXT.md` requires "loading/
+error/empty/403/404/401 states" and server-side pagination/filtering everywhere the backend
+supports it. F01's own scope explicitly excludes implementing domain data-fetching hooks
+(`frontend_prompts/01-foundation/01_FRONTEND_AUDIT_ARCHITECTURE.md` §11-equivalent: "Không:
+implement domain hooks").
+**Options**:
+1. Install `@tanstack/react-query` now, in F01, so F02 can start writing hooks immediately.
+2. Decide and document the choice now; install it only when F02 actually writes the first
+   `useQuery`/`useMutation` hook.
+3. Defer the *decision* itself to F02 as well.
+**Decision**: Option 2.
+**Reason**: F01's own instructions explicitly warn against unnecessary dependencies
+("tránh dependency thừa") — installing a data-fetching library with zero call sites through
+an entire phase is exactly that. Option 3 risks each future phase re-litigating the choice;
+recording the decision now (with its reasoning: TanStack Query's `isPending`/`isError`/`data`
+result shape maps directly onto the master context's required loading/error/empty states,
+and its cache/pagination-aware query-key model fits the backend's page-based
+`{ data, meta }` convention naturally) fixes it without paying the install cost early.
+**Impact**: `apps/web/package.json` has no data-fetching dependency yet. `components/
+providers/app-providers.tsx` is already the designated mount point for
+`QueryClientProvider` once F02 adds it — no other file needs to change when that happens.
+
+---
+
+## DEC-09 — Minimal backend fix: `Lead`/`Case` list+detail now include a display-safe student/owner summary; `GET /cases` gained a `studentId` filter (Phase F03)
+
+**ID**: DEC-09
+**Context**: Building the F03 CRM frontend (Leads/Students/Cases) surfaced two real backend
+gaps, not frontend design choices: (1) `LeadsService.list()`/`getById()` and
+`CasesService.list()`/`getById()` returned bare `ownerId`/`studentId` foreign keys with no
+included relation — a list/detail page cannot show an owner's or student's name without
+either an N+1 fetch per row or pulling the entire User/Student table client-side, both of
+which `frontend_prompts/03-crm/03_CRM_FRONTEND.md`'s own instructions explicitly forbid
+("Không load toàn bộ Student dataset chỉ để render tên. Dùng API relation/response thật").
+(2) `GET /cases` had no way to filter by `studentId` at all, so a Student 360 view's "current
+case(s)" section had no query to call other than the same forbidden full-table-scan.
+(3) `CasesService.listMembers()` returned bare `CaseMember` rows (`userId` only) — the same
+gap, for the member-list UI.
+**Options**:
+1. Work around it in the frontend (fetch the full Case/Lead/Student/User lists and join
+   client-side) — explicitly forbidden by the frontend phase's own instructions, and a real
+   scalability/security problem (pulling every User row, including ones the caller has no
+   business reason to see, just to resolve a name).
+2. Invent a new dedicated endpoint (e.g. `GET /cases/summary`) duplicating existing logic.
+3. Minimally extend the two existing endpoints: add a `select`-scoped (never a bare
+   `include: { owner: true }`, which would leak `passwordHash`) relation on the two already-
+   existing queries, and add one new optional, scope-respecting query filter.
+**Decision**: Option 3.
+**Reason**: This is squarely "API bug thật cần sửa để CRM hoạt động," not "sửa backend chỉ
+để frontend dễ code hơn" (`frontend_prompts` F03 §31's own distinction) — the CRM list/detail
+UI the phase explicitly requires literally cannot be built correctly without it, and no
+existing behavior changes (both are additive: a new nested field on the response, a new
+optional filter that only narrows an already-scope-filtered query). Option 2 would duplicate
+the exact same scope-filtering/pagination logic `CasesService.list()` already has, violating
+the same "no duplicate entity/concept" principle this codebase applies everywhere else.
+**Reason (security)**: the owner/student "summary" is deliberately a Prisma `select`, never a
+bare relation `include`, specifically to avoid leaking `passwordHash`/`mfaSecret`-adjacent
+columns through an unrelated list endpoint — verified directly by a new e2e assertion
+(`expect(detail.body.owner).not.toHaveProperty('passwordHash')`).
+**Impact**: `LeadsService`/`CasesService` return `LeadWithOwner`/`CaseWithRelations` instead
+of bare `Lead`/`Case` from `list()`/`getById()` (additive types, existing callers unaffected —
+verified via `npm run api:typecheck`, 0 errors). `CaseQueryDto` gained an optional `studentId`
+field, scope-checked exactly like every other filter (a caller without access to a given
+Case still sees zero rows for that `studentId` — verified by a new e2e test). No migration, no
+schema change, no existing endpoint's URL/method/permission changed. Regression: `api:
+typecheck` PASS, `api:lint` PASS (0 new warnings), full unit suite 182/182 PASS, full e2e
+suite 478/478 PASS (run against the local Docker Postgres, `docker-compose.yml`'s `postgres`
+service — never against the production Supabase database in `.env`), plus 3 new e2e
+assertions (2 in `case-management.e2e-spec.ts`, 1 in `lead-conversion.e2e-spec.ts`) added
+specifically for this change, all passing.
+
+## DEC-10 — Minimal backend fix: `Contract` list+detail now include a display-safe student summary (Phase F04)
+
+**ID**: DEC-10
+**Context**: Building the F04 Commercial frontend (Contracts) surfaced the exact same gap
+DEC-09 already fixed for Lead/Case, this time on `ContractsService.list()`/`getById()`: both
+returned a bare `studentId` foreign key with no included relation, so a Contract list/detail
+page could not render which student a contract belongs to without either an N+1 fetch per
+row or a forbidden full-table scan of Students (`frontend_prompts/04-commercial-profile/
+04_COMMERCIAL_PROFILE_FRONTEND.md` inherits the same "no client-side full-table filtering"
+rule F03 already established).
+**Options**: identical menu to DEC-09 — (1) frontend-side full-table join, forbidden; (2) a
+new dedicated summary endpoint, duplicating `list()`/`getById()`'s existing scope-filtering
+logic; (3) minimally extend the two existing endpoints with a `select`-scoped relation.
+**Decision**: Option 3, exactly mirroring DEC-09's precedent — a new `STUDENT_SUMMARY_SELECT`
+constant in `contracts.service.ts` (`{ id, studentCode, fullName }`, never a bare `include:
+{ student: true } }`, which would leak `Student.budget`/`budgetCurrency` regardless of the
+caller's own field policy), added to `list()`/`getById()`'s Prisma queries only.
+**Reason**: same as DEC-09 — this is a genuine "API bug thật cần sửa để CRM hoạt động," not a
+convenience shortcut; the fix is additive (a new nested field on two already-existing
+endpoints' response), changes no existing endpoint's URL/method/permission/status code, and
+does not duplicate scope-filtering logic the way a new endpoint would.
+**Reason (type safety)**: `FieldPolicyService.redactContract` is called on every Contract
+response (defense-in-depth financial redaction, unrelated to this fix). Its signature was
+non-generic (`redactContract(contract: Contract, roleCode): RedactedContract`), so passing
+the new `ContractWithStudent` type through it would have silently widened the return type
+back down to plain `Contract`, dropping `.student` from what the frontend sees typed even
+though the actual response body still contained it. Made the method generic
+(`redactContract<T extends Contract>(...): Omit<T, ...> & Pick<RedactedContract, ...>`) so any
+extra fields a caller adds to the query (now, or in a future phase) survive redaction's type
+signature — the redaction logic itself is unchanged, still only ever nulls
+`value`/`currency`/`approvalThreshold` for the same `FINANCIAL_REDACTED_FOR` role set.
+**Impact**: `ContractsService.list()`/`getById()` return `ContractWithStudent` instead of bare
+`Contract` (additive type, every other `ContractsService` method — `submit`/`approve`/
+`reject`/`send`/`sign`/`updateStatus`/`createAmendment` — is untouched and still returns plain
+`Contract`, matching DEC-09's own asymmetric precedent for Case's mutation endpoints). No
+migration, no schema change, no existing endpoint's URL/method/permission changed. Regression:
+`api:typecheck` PASS (0 errors), plus 1 new e2e assertion in `contracts.e2e-spec.ts` asserting
+`GET /contracts`/`GET /contracts/:id` both embed `{id, studentCode, fullName}` and never a
+`budget` field. Full unit/e2e suite re-run recorded in `docs/frontend/phase-status/
+PHASE_F04.md`.

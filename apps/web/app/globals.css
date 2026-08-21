@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens (F01 foundation — see docs/frontend/FRONTEND_ARCHITECTURE.md
+ * "Design foundation"). Deliberately minimal: base colors, semantic status colors,
+ * one font stack. Domain UI in later phases consumes these tokens through Tailwind
+ * utility classes (bg-primary, text-danger, ...) rather than hard-coding hex values.
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  --border: #e5e7eb;
+  --muted: #f5f5f5;
+  --muted-foreground: #6b7280;
+
+  --primary: #1d4ed8;
+  --primary-foreground: #ffffff;
+
+  /* Semantic status colors — shared vocabulary across every domain's status badges
+     (Lead/Case/Contract/Application/Visa/... status fields all read as one of these
+     four categories; a domain phase maps its own enum values onto these, it never
+     invents a parallel color set). */
+  --status-success: #15803d;
+  --status-success-foreground: #ffffff;
+  --status-warning: #b45309;
+  --status-warning-foreground: #ffffff;
+  --status-danger: #b91c1c;
+  --status-danger-foreground: #ffffff;
+  --status-info: #0369a1;
+  --status-info-foreground: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-success: var(--status-success);
+  --color-success-foreground: var(--status-success-foreground);
+  --color-warning: var(--status-warning);
+  --color-warning-foreground: var(--status-warning-foreground);
+  --color-danger: var(--status-danger);
+  --color-danger-foreground: var(--status-danger-foreground);
+  --color-info: var(--status-info);
+  --color-info-foreground: var(--status-info-foreground);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}

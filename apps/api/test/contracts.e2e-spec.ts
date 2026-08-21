@@ -89,6 +89,28 @@ describe('Contracts (e2e)', () => {
     });
   });
 
+  describe('student relation summary (DEC-10)', () => {
+    it('GET /contracts and GET /contracts/:id embed a display-safe student summary, never the full Student row', async () => {
+      const listRes = await request(app.getHttpServer())
+        .get('/contracts')
+        .query({ studentId: fixtureStudentId })
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.data[0].student).toEqual({
+        id: fixtureStudentId,
+        studentCode: 'HS-2026-90001',
+        fullName: expect.any(String),
+      });
+      expect(listRes.body.data[0].student).not.toHaveProperty('budget');
+
+      const detailRes = await request(app.getHttpServer())
+        .get(`/contracts/${fixtureContractId}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(detailRes.status).toBe(200);
+      expect(detailRes.body.student).toEqual({ id: fixtureStudentId, studentCode: 'HS-2026-90001', fullName: expect.any(String) });
+    });
+  });
+
   describe('DRAFT editability and submit', () => {
     it('allows editing while DRAFT', async () => {
       const { contract } = await createDraftContract();

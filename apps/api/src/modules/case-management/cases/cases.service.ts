@@ -16,6 +16,22 @@ import { UpdateCaseStageDto } from './dto/update-case-stage.dto';
 
 const SORTABLE_FIELDS = ['createdAt', 'stage', 'status', 'openedAt'] as const;
 
+/// Display-safe summaries — never a full `include: { student: true }`/`{ owner: true }`
+/// (the latter would leak `passwordHash` and other sensitive User columns). Phase F03
+/// (frontend CRM) fix: `list()`/`getById()` previously returned bare `studentId`/`ownerId`
+/// with no way to show a case's student/owner name without either an N+1 fetch per row or
+/// pulling the entire Student/User table client-side — both explicitly disallowed by the
+/// frontend phase's own instructions. Additive only — no schema/behavior change.
+const OWNER_SUMMARY_SELECT = { select: { id: true, username: true, fullName: true } } as const;
+const STUDENT_SUMMARY_SELECT = { select: { id: true, studentCode: true, fullName: true } } as const;
+
+export type CaseWithRelations = Case & {
+  student: { id: string; studentCode: string; fullName: string };
+  owner: { id: string; username: string; fullName: string };
+};
+
+export type CaseMemberWithUser = CaseMember & { user: { id: string; username: string; fullName: string } };
+
 /// 04-core-crm/02_STUDENT_CASE.md: "assignment, collaborators, stage transitions, case
 /// timeline, closure checks." Every mutation here goes through the same scope check the
 /// Phase 03 read paths already use (`ScopePolicyService.assertCaseAccessible`) — cross-
@@ -47,7 +63,7 @@ export class CasesService {
     private readonly visaStatus: VisaStatusService,
   ) {}
 
-  async list(principal: Principal, query: CaseQueryDto): Promise<PaginatedResult<Case>> {
+  async list(principal: Principal, query: CaseQueryDto): Promise<PaginatedResult<CaseWithRelations>> {
     const { field, direction } = parseSort(query.sort, SORTABLE_FIELDS, { field: 'createdAt', direction: 'desc' });
     const page = query.page ?? 1;
     const limit = query.limit ?? DEFAULT_PAGE_SIZE;
@@ -55,18 +71,28 @@ export class CasesService {
     const where: Prisma.CaseWhereInput = {
       ...this.scope.caseListFilter(principal),
       ...(query.status ? { status: query.status } : {}),
+      ...(query.studentId ? { studentId: query.studentId } : {}),
     };
 
     const [data, totalItems] = await this.prisma.$transaction([
-      this.prisma.case.findMany({ where, orderBy: { [field]: direction }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.case.findMany({
+        where,
+        orderBy: { [field]: direction },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { student: STUDENT_SUMMARY_SELECT, owner: OWNER_SUMMARY_SELECT },
+      }),
       this.prisma.case.count({ where }),
     ]);
     return new PaginatedResult(data, new PageMeta(page, limit, totalItems));
   }
 
-  async getById(principal: Principal, id: string): Promise<Case> {
+  async getById(principal: Principal, id: string): Promise<CaseWithRelations> {
     await this.scope.assertCaseAccessible(principal, id);
-    const record = await this.prisma.case.findUnique({ where: { id } });
+    const record = await this.prisma.case.findUnique({
+      where: { id },
+      include: { student: STUDENT_SUMMARY_SELECT, owner: OWNER_SUMMARY_SELECT },
+    });
     if (!record || record.archivedAt) {
       throw new NotFoundException({ code: 'CASE_NOT_FOUND', message: `Case ${id} not found.` });
     }
@@ -246,9 +272,13 @@ export class CasesService {
     });
   }
 
-  async listMembers(principal: Principal, id: string): Promise<CaseMember[]> {
+  async listMembers(principal: Principal, id: string): Promise<CaseMemberWithUser[]> {
     await this.scope.assertCaseAccessible(principal, id);
-    return this.prisma.caseMember.findMany({ where: { caseId: id, removedAt: null }, orderBy: { addedAt: 'asc' } });
+    return this.prisma.caseMember.findMany({
+      where: { caseId: id, removedAt: null },
+      orderBy: { addedAt: 'asc' },
+      include: { user: OWNER_SUMMARY_SELECT },
+    });
   }
 
   /// Record-scope (read access) plus a stricter "may I manage membership/stage/status"

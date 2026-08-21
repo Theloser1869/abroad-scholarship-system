@@ -15,6 +15,16 @@ import { UpdateLeadDto } from './dto/update-lead.dto';
 
 const SORTABLE_FIELDS = ['createdAt', 'contactName', 'status', 'score'] as const;
 
+/// Display-safe owner summary — never the full `User` row (would leak `passwordHash` and
+/// other sensitive columns through `include`). Phase F03 (frontend CRM) fix: `list()`/
+/// `getById()` previously returned bare `ownerId` with no way for a caller to show the
+/// owner's name without either a second per-row fetch (N+1) or fetching the entire User
+/// table client-side — both explicitly disallowed by the frontend phase's own instructions.
+/// This is additive only (new nested field on the response), not a schema/behavior change.
+const OWNER_SUMMARY_SELECT = { select: { id: true, username: true, fullName: true } } as const;
+
+export type LeadWithOwner = Lead & { owner: { id: string; username: string; fullName: string } };
+
 /// 04-core-crm/01_LEAD.md status machine: New→Contacted→Qualified→Consultation→
 /// Contracting→Converted/Lost. CONVERTED is reachable only through `convert()` below (SRS
 /// section 9: "Converted chỉ khi tạo được Contract/Student hợp lệ") — never a bare status
@@ -46,7 +56,7 @@ export class LeadsService {
     private readonly taskGeneration: TaskGenerationService,
   ) {}
 
-  async list(principal: Principal, query: LeadQueryDto): Promise<PaginatedResult<Lead>> {
+  async list(principal: Principal, query: LeadQueryDto): Promise<PaginatedResult<LeadWithOwner>> {
     const { field, direction } = parseSort(query.sort, SORTABLE_FIELDS, { field: 'createdAt', direction: 'desc' });
     const page = query.page ?? 1;
     const limit = query.limit ?? DEFAULT_PAGE_SIZE;
@@ -68,15 +78,21 @@ export class LeadsService {
     };
 
     const [data, totalItems] = await this.prisma.$transaction([
-      this.prisma.lead.findMany({ where, orderBy: { [field]: direction }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.lead.findMany({
+        where,
+        orderBy: { [field]: direction },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { owner: OWNER_SUMMARY_SELECT },
+      }),
       this.prisma.lead.count({ where }),
     ]);
     return new PaginatedResult(data, new PageMeta(page, limit, totalItems));
   }
 
-  async getById(principal: Principal, id: string): Promise<Lead> {
+  async getById(principal: Principal, id: string): Promise<LeadWithOwner> {
     await this.scope.assertLeadAccessible(principal, id);
-    const lead = await this.prisma.lead.findUnique({ where: { id } });
+    const lead = await this.prisma.lead.findUnique({ where: { id }, include: { owner: OWNER_SUMMARY_SELECT } });
     if (!lead) throw new NotFoundException({ code: 'LEAD_NOT_FOUND', message: `Lead ${id} not found.` });
     return lead;
   }

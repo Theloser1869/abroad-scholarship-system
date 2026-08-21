@@ -19,6 +19,16 @@ import { UpdateContractDto } from './dto/update-contract.dto';
 
 const SORTABLE_FIELDS = ['createdAt', 'value', 'status'] as const;
 
+/// Display-safe student summary — same `select`-scoped pattern as `cases.service.ts`'s
+/// `STUDENT_SUMMARY_SELECT` (docs/DECISIONS.md DEC-09), never a bare `include: { student:
+/// true } }` (would leak `budget`/`budgetCurrency` regardless of the caller's own field
+/// policy). Added for DEC-10 — see docs/DECISIONS.md: a Contract list/detail page cannot
+/// render which student a contract belongs to without either this or a forbidden N+1/
+/// full-table-scan workaround.
+const STUDENT_SUMMARY_SELECT = { select: { id: true, studentCode: true, fullName: true } } as const;
+
+export type ContractWithStudent = Contract & { student: { id: string; studentCode: string; fullName: string } };
+
 /// SRS section 9 Contract status machine. Each of DRAFT/REVIEW/APPROVED/SENT/SIGNED has
 /// its own dedicated method with its own preconditions (submit/approve/reject/send/sign)
 /// — `updateStatus` only covers the remaining simple forward moves after signing, the
@@ -52,7 +62,7 @@ export class ContractsService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async list(principal: Principal, query: ContractQueryDto): Promise<PaginatedResult<Contract>> {
+  async list(principal: Principal, query: ContractQueryDto): Promise<PaginatedResult<ContractWithStudent>> {
     const { field, direction } = parseSort(query.sort, SORTABLE_FIELDS, { field: 'createdAt', direction: 'desc' });
     const page = query.page ?? 1;
     const limit = query.limit ?? DEFAULT_PAGE_SIZE;
@@ -64,17 +74,23 @@ export class ContractsService {
     };
 
     const [data, totalItems] = await this.prisma.$transaction([
-      this.prisma.contract.findMany({ where, orderBy: { [field]: direction }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.contract.findMany({
+        where,
+        orderBy: { [field]: direction },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { student: STUDENT_SUMMARY_SELECT },
+      }),
       this.prisma.contract.count({ where }),
     ]);
-    return new PaginatedResult(data, new PageMeta(page, limit, totalItems));
+    return new PaginatedResult(data as ContractWithStudent[], new PageMeta(page, limit, totalItems));
   }
 
-  async getById(principal: Principal, id: string): Promise<Contract> {
+  async getById(principal: Principal, id: string): Promise<ContractWithStudent> {
     await this.scope.assertContractAccessible(principal, id);
-    const contract = await this.prisma.contract.findUnique({ where: { id } });
+    const contract = await this.prisma.contract.findUnique({ where: { id }, include: { student: STUDENT_SUMMARY_SELECT } });
     if (!contract) throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: `Contract ${id} not found.` });
-    return contract;
+    return contract as ContractWithStudent;
   }
 
   /// "Không tạo Student hoặc Case mới chỉ vì tạo Contract" — `dto.studentId` must already

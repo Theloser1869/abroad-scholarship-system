@@ -16,7 +16,13 @@
     "api:typecheck": "npm run typecheck -w apps/api",
     "api:lint": "npm run lint -w apps/api",
     "api:test": "npm run test -w apps/api",
-    "api:test:e2e": "npm run test:e2e -w apps/api"
+    "api:test:e2e": "npm run test:e2e -w apps/api",
+    "web:dev": "npm run dev -w apps/web",
+    "web:build": "npm run build -w apps/web",
+    "web:start": "npm run start -w apps/web",
+    "web:lint": "npm run lint -w apps/web",
+    "web:typecheck": "npm run typecheck -w apps/web",
+    "web:test": "npm run test -w apps/web"
   },
   "prisma": {
     "schema": "database/schema.prisma",

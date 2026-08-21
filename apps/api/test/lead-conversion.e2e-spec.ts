@@ -51,6 +51,23 @@ describe('Lead conversion (e2e)', () => {
     expect(lead.leadCode).toMatch(/^LEAD-\d{4}-\d{5}$/);
   });
 
+  /// Phase F03 (frontend CRM) fix regression: `GET /leads`/`GET /leads/:id` previously
+  /// returned bare `ownerId` with no way to show the owner's name without an N+1 fetch.
+  it('GET /leads and GET /leads/:id include a display-safe owner summary, never the full User row', async () => {
+    const lead = await createLead();
+
+    const detail = await request(app.getHttpServer()).get(`/leads/${lead.id}`).set('Authorization', `Bearer ${salesToken}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.owner).toMatchObject({ id: salesUserId });
+    expect(detail.body.owner).toHaveProperty('fullName');
+    expect(detail.body.owner).not.toHaveProperty('passwordHash');
+
+    const list = await request(app.getHttpServer()).get('/leads').query({ ownerId: salesUserId }).set('Authorization', `Bearer ${salesToken}`);
+    expect(list.status).toBe(200);
+    const found = list.body.data.find((l: { id: string }) => l.id === lead.id);
+    expect(found.owner.fullName).toBeDefined();
+  });
+
   describe('status transitions', () => {
     it('walks the legal chain NEW -> CONTACTED -> QUALIFIED -> CONSULTATION -> CONTRACTING', async () => {
       const lead = await createLead();
