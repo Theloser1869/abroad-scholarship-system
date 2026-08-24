@@ -15,10 +15,13 @@ import {
   useAddStudentNote,
   useCreateCaseForStudent,
   useCreateStudentContact,
+  useInviteParent,
+  useRevokeParentAccess,
 } from "@/lib/students/hooks";
 import { StudentFormDialog } from "@/components/crm/students/student-form-dialog";
 import { StudentContactFormDialog } from "@/components/crm/students/student-contact-form-dialog";
-import { StatusBadge, CASE_STATUS_VARIANT, CASE_STATUS_LABEL } from "@/components/crm/status-badge";
+import { ConfirmDialog } from "@/components/crm/confirm-dialog";
+import { StatusBadge, CASE_STATUS_VARIANT, CASE_STATUS_LABEL, PORTAL_LINK_STATUS_VARIANT, PORTAL_LINK_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
 import { TimelineView } from "@/components/crm/timeline-view";
 import { NoteForm } from "@/components/crm/note-form";
@@ -26,6 +29,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
+import { usePartnerStudentLinksForStudent } from "@/lib/partner-student-links/hooks";
 
 export function StudentDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
@@ -35,24 +39,30 @@ export function StudentDetailContent({ id }: { id: string }) {
   const { data: timeline, isLoading: timelineLoading, error: timelineError, refetch: refetchTimeline } = useStudentTimeline(id);
   const { data: contacts, isLoading: contactsLoading, error: contactsError } = useStudentContacts(id);
   const { data: cases, isLoading: casesLoading, error: casesError } = useCasesForStudent(id);
+  const canViewPartnerLinks = can("partner_student_links", "view");
+  const { data: partnerLinks, isLoading: partnerLinksLoading, error: partnerLinksError } = usePartnerStudentLinksForStudent(canViewPartnerLinks ? id : "", { limit: 50 });
 
   const updateStudent = useUpdateStudent(id);
   const archiveStudent = useArchiveStudent(id);
   const addNote = useAddStudentNote(id);
   const createCase = useCreateCaseForStudent(id);
   const createContact = useCreateStudentContact(id);
+  const inviteParent = useInviteParent(id);
+  const revokeParentAccess = useRevokeParentAccess(id);
 
   const [editOpen, setEditOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<{ contactId: string; name: string } | null>(null);
 
   if (isLoading) return <LoadingState />;
   if (error || !student) return <QueryErrorState error={error} onRetry={() => refetch()} />;
 
   async function handleArchive() {
-    if (!window.confirm("Lưu trữ học sinh này? Thao tác này ẩn học sinh khỏi các danh sách hoạt động.")) return;
     try {
       await archiveStudent.mutateAsync();
       toast({ title: "Đã lưu trữ học sinh.", variant: "success" });
+      setArchiveOpen(false);
     } catch (err) {
       toast({ title: "Lỗi", description: crmErrorMessage(err), variant: "danger" });
     }
@@ -63,6 +73,34 @@ export function StudentDetailContent({ id }: { id: string }) {
       const created = await createCase.mutateAsync({});
       toast({ title: "Đã tạo case mới.", variant: "success" });
       router.push(`/cases/${created.id}`);
+    } catch (err) {
+      toast({ title: "Lỗi", description: crmErrorMessage(err), variant: "danger" });
+    }
+  }
+
+  /// F08 — the staff-side trigger for the Parent portal-access lifecycle. `devToken` (only
+  /// ever returned outside production — no email-delivery integration exists yet) is shown
+  /// once via toast so staff can relay the `/public/portal/invite/[token]` link out-of-band
+  /// in this environment; never persisted beyond that toast.
+  async function handleInviteParent(contactId: string) {
+    try {
+      const result = await inviteParent.mutateAsync(contactId);
+      toast({
+        title: "Đã gửi lời mời.",
+        description: result.devToken ? `Link kích hoạt (chỉ hiện ngoài production): /public/portal/invite/${result.devToken}` : undefined,
+        durationMs: result.devToken ? 0 : 5000,
+      });
+    } catch (err) {
+      toast({ title: "Lỗi", description: crmErrorMessage(err), variant: "danger" });
+    }
+  }
+
+  async function handleRevokeParentAccess() {
+    if (!revokeTarget) return;
+    try {
+      await revokeParentAccess.mutateAsync(revokeTarget.contactId);
+      toast({ title: "Đã thu hồi quyền truy cập.", variant: "success" });
+      setRevokeTarget(null);
     } catch (err) {
       toast({ title: "Lỗi", description: crmErrorMessage(err), variant: "danger" });
     }
@@ -89,7 +127,7 @@ export function StudentDetailContent({ id }: { id: string }) {
             </Button>
           ) : null}
           {can("students", "archive") && !student.archivedAt ? (
-            <Button variant="danger" onClick={handleArchive} disabled={archiveStudent.isPending}>
+            <Button variant="danger" onClick={() => setArchiveOpen(true)} disabled={archiveStudent.isPending}>
               Lưu trữ
             </Button>
           ) : null}
@@ -148,13 +186,30 @@ export function StudentDetailContent({ id }: { id: string }) {
           ) : (
             <ul className="space-y-2 text-sm">
               {contacts.map((c) => (
-                <li key={c.id} className="border-b border-border pb-2 last:border-0">
-                  <p className="font-medium">
-                    {c.name} <span className="font-normal text-muted-foreground">({c.relationship ?? c.type})</span>
-                  </p>
+                <li key={c.id} className="space-y-1 border-b border-border pb-2 last:border-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium">
+                      {c.name} <span className="font-normal text-muted-foreground">({c.relationship ?? c.type})</span>
+                    </p>
+                    <StatusBadge status={c.portalStatus} variantMap={PORTAL_LINK_STATUS_VARIANT} label={PORTAL_LINK_STATUS_LABEL[c.portalStatus]} />
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {c.phone ?? "—"} · {c.email ?? "—"}
                   </p>
+                  {can("students", "edit") ? (
+                    <div className="flex gap-2">
+                      {(c.portalStatus === "NONE" || c.portalStatus === "REVOKED") && c.email ? (
+                        <Button variant="secondary" onClick={() => handleInviteParent(c.id)} disabled={inviteParent.isPending}>
+                          Mời vào cổng thông tin
+                        </Button>
+                      ) : null}
+                      {c.portalStatus === "ACTIVE" ? (
+                        <Button variant="danger" onClick={() => setRevokeTarget({ contactId: c.id, name: c.name })} disabled={revokeParentAccess.isPending}>
+                          Thu hồi quyền truy cập
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -186,6 +241,46 @@ export function StudentDetailContent({ id }: { id: string }) {
         )}
       </Card>
 
+      {can("university_choices", "view") ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Tuyển sinh</CardTitle>
+          </CardHeader>
+          <Link href={`/students/${id}/university-choices`} className="text-sm text-primary hover:underline">
+            Lựa chọn trường (Reach/Match/Safety) →
+          </Link>
+        </Card>
+      ) : null}
+
+      {canViewPartnerLinks ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Đối tác liên kết</CardTitle>
+          </CardHeader>
+          {partnerLinksLoading ? (
+            <LoadingState rows={2} />
+          ) : partnerLinksError ? (
+            <QueryErrorState error={partnerLinksError} />
+          ) : !partnerLinks || partnerLinks.data.length === 0 ? (
+            <EmptyState title="Chưa có đối tác liên kết nào." />
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {partnerLinks.data.map((link) => (
+                <li key={link.id} className="flex items-center justify-between border-b border-border pb-2 last:border-0">
+                  <div>
+                    <span className="font-medium">{link.partner.name}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {link.linkType} · {link.partner.countryCode}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{link.status === "ACTIVE" ? "Đang hoạt động" : "Đã lưu trữ"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Hoạt động &amp; Ghi chú</CardTitle>
@@ -208,6 +303,26 @@ export function StudentDetailContent({ id }: { id: string }) {
         onClose={() => setContactOpen(false)}
         onSubmit={(input) => createContact.mutateAsync(input)}
         submitting={createContact.isPending}
+      />
+      <ConfirmDialog
+        open={archiveOpen}
+        onClose={() => setArchiveOpen(false)}
+        title="Lưu trữ học sinh"
+        description="Thao tác này ẩn học sinh khỏi các danh sách hoạt động."
+        confirmLabel="Lưu trữ"
+        variant="danger"
+        onConfirm={handleArchive}
+        submitting={archiveStudent.isPending}
+      />
+      <ConfirmDialog
+        open={!!revokeTarget}
+        onClose={() => setRevokeTarget(null)}
+        title="Thu hồi quyền truy cập cổng thông tin"
+        description={revokeTarget ? `${revokeTarget.name} sẽ mất quyền truy cập cổng thông tin ngay lập tức.` : undefined}
+        confirmLabel="Thu hồi"
+        variant="danger"
+        onConfirm={handleRevokeParentAccess}
+        submitting={revokeParentAccess.isPending}
       />
     </div>
   );

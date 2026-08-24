@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { CommissionRule, CommissionTransaction, CommissionTransactionStatus, Prisma } from '@prisma/client';
+import { CommissionRule, CommissionTransaction, CommissionTransactionStatus, Partner, Prisma, Student } from '@prisma/client';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult } from '../../../common/dto/list-query.dto';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { CommissionRulesService } from '../commission-rules/commission-rules.service';
@@ -9,6 +9,19 @@ import { CreateCommissionTransactionDto } from './dto/create-commission-transact
 import { PayCommissionTransactionDto } from './dto/pay-commission-transaction.dto';
 
 const TERMINAL_STATUSES: CommissionTransactionStatus[] = ['PAID', 'CANCELLED'];
+
+/// DEC-12 — mirrors DEC-09/DEC-10/DEC-11's `STUDENT_SUMMARY_SELECT` pattern exactly.
+/// CommissionTransaction list/detail is core F06 UX ("Hiển thị: partner, student/case/
+/// application reference") and only carried bare FKs before this. `studentId` is nullable
+/// on this entity, so the embed is nullable-safe (Prisma returns `null` when the FK is
+/// unset, never throws).
+const PARTNER_SUMMARY_SELECT = { select: { id: true, name: true, countryCode: true } } as const;
+const STUDENT_SUMMARY_SELECT = { select: { id: true, studentCode: true, fullName: true } } as const;
+
+export type CommissionTransactionWithRelations = CommissionTransaction & {
+  partner: Pick<Partner, 'id' | 'name' | 'countryCode'>;
+  student: Pick<Student, 'id' | 'studentCode' | 'fullName'> | null;
+};
 
 /// 10-partners/01_PARTNER_CRM.md CommissionTransaction section. Statuses taken verbatim
 /// from the orchestration prompt's own example list — PENDING -> ELIGIBLE -> CALCULATED ->
@@ -26,7 +39,7 @@ export class CommissionTransactionsService {
     private readonly rules: CommissionRulesService,
   ) {}
 
-  async list(query: CommissionTransactionQueryDto): Promise<PaginatedResult<CommissionTransaction>> {
+  async list(query: CommissionTransactionQueryDto): Promise<PaginatedResult<CommissionTransactionWithRelations>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? DEFAULT_PAGE_SIZE;
     const where: Prisma.CommissionTransactionWhereInput = {
@@ -34,18 +47,24 @@ export class CommissionTransactionsService {
       ...(query.status ? { status: query.status } : {}),
     };
     const [data, totalItems] = await this.prisma.$transaction([
-      this.prisma.commissionTransaction.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.commissionTransaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { partner: PARTNER_SUMMARY_SELECT, student: STUDENT_SUMMARY_SELECT },
+      }),
       this.prisma.commissionTransaction.count({ where }),
     ]);
-    return new PaginatedResult(data, new PageMeta(page, limit, totalItems));
+    return new PaginatedResult(data as CommissionTransactionWithRelations[], new PageMeta(page, limit, totalItems));
   }
 
-  async listForPartner(partnerId: string, query: CommissionTransactionQueryDto): Promise<PaginatedResult<CommissionTransaction>> {
+  async listForPartner(partnerId: string, query: CommissionTransactionQueryDto): Promise<PaginatedResult<CommissionTransactionWithRelations>> {
     await this.assertPartnerExists(partnerId);
     return this.list({ ...query, partnerId });
   }
 
-  async getById(id: string): Promise<CommissionTransaction> {
+  async getById(id: string): Promise<CommissionTransactionWithRelations> {
     return this.findOrThrow(id);
   }
 
@@ -261,8 +280,11 @@ export class CommissionTransactionsService {
     if (!partner) throw new NotFoundException({ code: 'PARTNER_NOT_FOUND', message: `Partner ${partnerId} not found.` });
   }
 
-  private async findOrThrow(id: string): Promise<CommissionTransaction> {
-    const transaction = await this.prisma.commissionTransaction.findUnique({ where: { id } });
+  private async findOrThrow(id: string): Promise<CommissionTransactionWithRelations> {
+    const transaction = await this.prisma.commissionTransaction.findUnique({
+      where: { id },
+      include: { partner: PARTNER_SUMMARY_SELECT, student: STUDENT_SUMMARY_SELECT },
+    });
     if (!transaction) throw new NotFoundException({ code: 'COMMISSION_TRANSACTION_NOT_FOUND', message: `Commission transaction ${id} not found.` });
     return transaction;
   }

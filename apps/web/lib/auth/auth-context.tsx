@@ -142,12 +142,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async (): Promise<void> => {
-    await authApi.logout();
-    setPrincipal(null);
-    setDisplayUser(null);
-    setStatus("UNAUTHENTICATED");
-    queryClient.clear();
-    router.push("/login");
+    // authApi.logout() already clears the access token in its own try/finally even when the
+    // network call fails (F10 finding: a prior version let that rejection propagate out of
+    // this callback uncaught, since UserMenu fires it as `void logout()` — the token was gone
+    // but this state teardown + redirect below never ran, leaving the UI showing a stale
+    // "still logged in" page). Best-effort, same "staying logged in locally while the backend
+    // call's outcome is unknown is worse than the reverse" reasoning authApi.logout() itself uses.
+    try {
+      await authApi.logout();
+    } catch {
+      // swallow — state is torn down unconditionally below regardless of outcome.
+    } finally {
+      setPrincipal(null);
+      setDisplayUser(null);
+      setStatus("UNAUTHENTICATED");
+      queryClient.clear();
+      router.push("/login");
+    }
   }, [queryClient, router]);
 
   return (

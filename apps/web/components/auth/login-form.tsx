@@ -31,7 +31,30 @@ export function LoginForm() {
 
   function redirectAfter(roleCode: string) {
     const next = searchParams.get("next");
-    if (next && next.startsWith("/")) {
+    // F09 hardening (instruction §31 "No infinite redirect loops" + §32 security-sensitive
+    // UX), extended F11A (instruction §11, re-testing this exact logic against the new
+    // same-origin `/api/*` proxy path). `next.startsWith("/")` alone still accepts several
+    // real problems:
+    // - `//evil.com` is a protocol-relative URL some routers/browsers resolve as external
+    //   (an open-redirect shape).
+    // - `/\evil.com` (a leading backslash) is a known WHATWG-URL-parsing bypass for a naive
+    //   `//`-only check: browsers normalize a leading backslash to a forward slash for
+    //   "special" schemes, so `/\evil.com` can resolve identically to `//evil.com`.
+    // - `next=/login` would send a just-logged-in user right back to the login page, which
+    //   re-fires this same effect and can loop.
+    // - `next=/api/...` (new since F11A's same-origin proxy) is technically same-origin but
+    //   is never a legitimate page-navigation target — it's an API-proxy path with no page
+    //   behind it; redirecting a browser navigation there would render raw proxied API
+    //   output instead of the app, not a security hole but a broken destination that a
+    //   crafted `?next=` should not be able to force.
+    const isSafeInternalPath =
+      !!next &&
+      next.startsWith("/") &&
+      !next.startsWith("//") &&
+      !next.startsWith("/\\") &&
+      !next.startsWith("/login") &&
+      !next.startsWith("/api");
+    if (isSafeInternalPath) {
       router.replace(next);
       return;
     }

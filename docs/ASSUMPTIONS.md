@@ -1599,3 +1599,442 @@ matches the F04 instruction's own placement (LOR is listed under the WRITING sec
 sibling top-level area).
 **Affected modules**: `apps/web/lib/lor/**`, `apps/web/components/crm/writing/
 lor-form-dialog.tsx`, `apps/web/app/(staff)/cases/[caseId]/writing-artifacts/page.tsx`.
+
+## ASM-64 — University Choice detail has no dedicated route (Phase F05)
+
+**Date**: 2026-08-23
+**Context**: F01's route plan maps `/students/[studentId]/university-choices` (list) for
+School Selection but never a `/university-choices/[id]` detail route, even though the backend
+has a real `GET /university-choices/:id` (+ `PATCH`/`POST .../review`) endpoint. F05's own
+instruction §12 also does not name a standalone detail page, only "choices list... add... edit...
+archive/remove."
+**Decision**: Built edit and review as Dialogs launched from the student-scoped list page, never
+a new route — same reasoning as ASM-62/ASM-63.
+**Reason**: Consistent standing rule ("không tự tạo route ngoài F01's mapped set"). A Dialog
+satisfies the functional requirement (view/edit/review a choice) without inventing navigation
+structure; the shared `DuplicateConflictNotice` component's link to a conflicting record is
+correspondingly omitted for this one entity (message-only), since there is no route to link to.
+**Affected modules**: `apps/web/components/crm/university-choices/
+university-choice-form-dialog.tsx`, `apps/web/app/(staff)/students/[id]/university-choices/
+page.tsx`, `apps/web/components/crm/duplicate-conflict-notice.tsx` (the `hrefBuilder`/`linkLabel`
+props were made optional specifically to support this omission).
+
+## ASM-65 — University Choice scope is the Student, not the Case (Phase F05)
+
+**Date**: 2026-08-23
+**Context**: F05's own mega-prompt §12 states "Nếu Case ID là source of scope: route/query phải
+giữ đúng case context" for University Choice, implying Case-scoping. The live backend
+(`StudentUniversityChoicesController` at `/students/:studentId/university-choices`,
+`UniversityChoicesService.listForStudent`/`assertAccessible`) scopes it to the **Student**
+instead — `caseId` is only an optional linkage field (nullable in `schema.prisma`, since a
+choice may be proposed during early counseling before a Case formally exists), never the
+routing/authorization key. F01's own `FRONTEND_ROUTES.md` already correctly mapped the
+student-scoped route ahead of this phase, matching the live backend, not the mega-prompt's
+assumption.
+**Decision**: Followed the live backend and F01's own route map — `/students/[studentId]/
+university-choices`, scoped and authorized via `assertStudentAccessible` (falling back to
+`assertCaseAccessible` only when a specific choice happens to have `caseId` set).
+**Reason**: Per this project's standing rule, backend implementation is the source of truth
+over a planning document when the two disagree; documented here rather than silently
+"correcting" the mega-prompt's framing without a record of the discrepancy.
+**Affected modules**: `apps/web/lib/university-choices/**`, `apps/web/app/(staff)/students/[id]/
+university-choices/page.tsx`.
+
+## ASM-66 — Program/University/ScholarshipMaster pickers never need a manual-UUID fallback (Phase F05)
+
+**Date**: 2026-08-23
+**Context**: F03/F04 established the `UserPicker`/`StudentPicker` pattern — a search-as-you-type
+picker that degrades to a manual-UUID `<Input>` for any role lacking the underlying list
+endpoint's view permission (e.g. ADMIN_FINANCE has zero `students:view` grant). F05 needed the
+same shape of picker for `programId`/`universityId`/`scholarshipMasterId` fields across
+University Choice/Application/ScholarshipMaster/ScholarshipApplication creation.
+**Decision**: Built `ProgramPicker`/`UniversityPicker`/`ScholarshipMasterPicker` **without** a
+manual-UUID fallback branch — always the real search UI.
+**Reason**: Verified directly against `rbac-data.ts`'s per-role grants that every role capable
+of creating a University Choice, Application, or ScholarshipApplication (CONSULTANT,
+DOCUMENT_SPECIALIST, EXECUTIVE_DIRECTOR, DEPARTMENT_MANAGER) also holds `admission_master:view`
+— unlike `students`/`users`, which some roles that need Contract/Milestone creation genuinely
+lack. `admission_master` is GLOBAL, permission-gated catalog data with no per-record scope, so
+there is no role for which the fallback branch would ever actually render; adding one would be
+dead code, not a defensive feature.
+**Affected modules**: `apps/web/components/crm/programs/program-picker.tsx`,
+`apps/web/components/crm/universities/university-picker.tsx`,
+`apps/web/components/crm/scholarship-masters/scholarship-master-picker.tsx`.
+
+## ASM-67 — PartnerProgram/PartnerDocument/PartnerStudentLink have no dedicated routes (Phase F06)
+
+**Date**: 2026-08-24
+**Context**: F01's `FRONTEND_ROUTES.md` groups Partner's sub-resources inside the same table
+cell as the Partner detail route itself — "`/partners/[id]` + `.../programs`, `.../documents`,
+`.../student-links`" — rather than giving each one its own bracketed row the way `/commission-
+transactions`, `/commission-transactions/[id]` are listed. All three have real backend endpoints
+(`GET/POST /partners/:id/programs`, `.../documents`, `.../student-links`, plus `GET/PATCH
+/partner-programs/:id`, `/partner-documents/:id`, `/partner-student-links/:id`), but the route
+map's own cell-grouping syntax reads as "sections on the Partner page," not standalone routes —
+the same grouping pattern F04 used for Payment/Milestone (ASM-62) and F05 used for University
+Choice (ASM-64).
+**Decision**: Built all three as sections-with-Dialogs on `/partners/[id]`, never as standalone
+`/partner-programs/[id]`, `/partner-documents/[id]`, or `/partner-student-links/[id]` routes.
+**Reason**: Consistent with the project's standing rule ("không tự tạo route ngoài F01's mapped
+set") and this project's own established precedent for reading F01's cell-grouping syntax
+literally (ASM-62/63/64). A Dialog satisfies the functional requirement (create/edit/activate/
+archive each sub-resource) without inventing navigation structure F01 never planned.
+**Affected modules**: `apps/web/components/crm/partner-programs/**`, `apps/web/components/crm/
+partner-documents/**`, `apps/web/components/crm/partner-student-links/**`,
+`apps/web/app/(staff)/partners/[id]/page.tsx`.
+
+## ASM-68 — CommissionRule gets its own list route but no detail route; CommissionTransaction gets global-only routes (Phase F06)
+
+**Date**: 2026-08-24
+**Context**: Unlike PartnerProgram/PartnerDocument/PartnerStudentLink, F01's route map lists
+Commission's rows with their own bracketed routes: `/partners/[partnerId]/commission-rules`
+(list, partner-scoped) alongside `/commission-transactions` and `/commission-transactions/[id]`
+(both global, unscoped by partner) — a different grouping treatment from ASM-67's three
+sub-resources, even though the backend also exposes a partner-nested commission-transactions
+list endpoint (`GET /partners/:id/commission-transactions`).
+**Decision**: Built `CommissionRule` as a list-only route nested under Partner (`/partners/
+[partnerId]/commission-rules`) with create/edit/activate/deactivate as Dialogs (no `/commission-
+rules/[id]` detail route — matching ASM-64's "list route, Dialog-only detail" precedent for
+University Choice). Built `CommissionTransaction` as global-only routes (`/commission-
+transactions`, `/commission-transactions/[id]`) — no `/partners/[partnerId]/commission-
+transactions` route, even though the backend endpoint exists; creating a transaction for a
+specific partner happens via a Dialog on the Partner detail page that calls the nested create
+endpoint, landing the user on the global detail route afterward.
+**Reason**: Followed F01's own route map literally, exactly as ASM-67 did for the other three
+sub-resources — the map's bracketed-route syntax for Commission is genuinely different from its
+cell-grouping syntax for Program/Document/StudentLink, so the two entities warranted different
+treatment even though both are Partner sub-resources.
+**Affected modules**: `apps/web/app/(staff)/partners/[partnerId]/commission-rules/page.tsx`,
+`apps/web/app/(staff)/commission-transactions/page.tsx`, `apps/web/app/(staff)/commission-
+transactions/[id]/page.tsx`, `apps/web/components/crm/commission-transactions/
+commission-transaction-create-dialog.tsx`.
+
+## ASM-69 — Pre-departure is the same `VisaChecklistItem` model as Visa's checklist, not a separate entity (Phase F06)
+
+**Date**: 2026-08-24
+**Context**: F06's own mega-prompt describes Pre-departure as if it were its own record with a
+checklist, deadline, ownership, and completion state — language that reads like a dedicated
+PreDeparture model. The live backend has no such model: `database/schema.prisma` defines only
+`VisaChecklistItem`, a polymorphic table distinguished by `entityType` (`'Visa'` or
+`'PreDeparture'`) and `entityId` (a Visa's id or, for Pre-departure, the Case's id directly).
+`PreDepartureService.listForCase()` returns a plain `VisaChecklistItem[]`, reusing the identical
+`ChecklistItemStatus` enum F05 already established for Application checklists. There is no "mark
+pre-departure complete" action anywhere — completeness is enforced only at Case Closure (`409
+PRE_DEPARTURE_CHECKLIST_INCOMPLETE`, pre-existing F03/F04 scope, unchanged by this phase).
+**Decision**: Built `lib/pre-departure/types.ts` as a thin re-export of `VisaChecklistItem` from
+`lib/visas/types.ts` (`export type PreDepartureItem = VisaChecklistItem`), not a duplicated
+type; the Pre-departure workspace page renders a server-reported per-item progress count
+("X/Y hạng mục đã hoàn tất hoặc miễn trừ") computed from the loaded array, never a client-
+invented "overall complete" boolean or overdue calculation.
+**Reason**: Per this project's standing rule, backend implementation is the source of truth over
+a mega-prompt's descriptive language; inventing a separate PreDeparture type/model on the
+frontend would misrepresent the actual API shape and risk drifting from `VisaChecklistItem` if
+the shared model changes later.
+**Affected modules**: `apps/web/lib/pre-departure/types.ts`, `apps/web/app/(staff)/cases/
+[caseId]/pre-departure/page.tsx`.
+
+## ASM-70 — Enrollment's University/Program are always server-derived from the Offer, never client-selectable (Phase F06)
+
+**Date**: 2026-08-24
+**Context**: F06's own instructions describe Enrollment as capturing "institution/program" —
+language that could imply a form field for picking a University/Program directly. The live
+backend (`EnrollmentsService.create()`) derives `universityId`/`programId` entirely server-side
+from `offer.application.programId` at creation time; the DTO (`CreateEnrollmentDto`) accepts
+only `offerId`, `startDate`, `evidenceDocumentId` — there is no `universityId`/`programId`
+field to submit even if the frontend wanted to. Offer "validity" (must belong to the Case and be
+ACCEPTED) is enforced at Enrollment-create time via `409 INVALID_ENROLLMENT_TARGET`, not a
+separate pre-check endpoint.
+**Decision**: `EnrollmentFormDialog`'s create mode collects only `offerId` (a manual UUID input,
+same "manual UUID for a narrow linkage field" precedent as F04/F05 evidence fields — no case-
+scoped Offer picker exists yet), `startDate`, and `evidenceDocumentId`. `409
+INVALID_ENROLLMENT_TARGET` is surfaced verbatim from the server, never pre-filtered by an
+invented client-side "is this offer valid" check.
+**Reason**: Structurally impossible to do otherwise — the backend contract has no field to carry
+a client-chosen University/Program, and DEC-12's University/Program summary embed exists purely
+for **display** on the list/detail views, not as an editable input.
+**Affected modules**: `apps/web/components/crm/enrollments/enrollment-form-dialog.tsx`,
+`apps/web/lib/enrollments/types.ts`.
+
+## ASM-71 — Document has no `GET /documents` list route at all — the F07 "Documents" hub is a lookup + upload entry point, never a browser (Phase F07)
+
+**Date**: 2026-08-24
+**Context**: F07's own instructions ask for a "document browser/list," but explicitly gate
+that on backend support: "Không tạo global document browser nếu backend không có global list
+route." `DocumentsController` (`apps/api/src/modules/documents/documents/documents.controller.ts`)
+has exactly seven routes — `POST /`, `GET /:id`, `PATCH /:id`, `POST /:id/share`,
+`POST /:id/archive`, `POST /:id/versions`, `GET /:id/download`, plus the public
+`GET /download/:token` — no bare `GET /` list route exists, not even an owner-entity-scoped
+one. `DocumentsService.listAccessibleTo()` exists but is never wired to any controller route
+(dead code from the caller's perspective — Portal's document listing is a separate,
+Portal-scoped endpoint, out of F07 scope). This was already documented as a limitation in
+`docs/frontend/FRONTEND_ROUTES.md`'s F01-era "Documents" row before F07 began.
+**Decision**: `/documents` is a small hub (lookup-by-id form + an upload entry point), not a
+list/table. `/documents/[id]` is the only way to view a document's full metadata, always
+reached either by a known id (an owning record's evidence link, now enhanced with a "Chi
+tiết" link via `EvidenceDocumentLink`) or manual id entry. No client-side aggregation across
+multiple `GET /documents/:id` calls was built to fake a list.
+**Reason**: Inventing a list by calling `GET /:id` in a loop over guessed/enumerated ids would
+be exactly the kind of IDOR-adjacent enumeration AC-02 protections exist to prevent (F07
+instruction §16), and there is no safe set of ids to loop over.
+**Affected modules**: `apps/web/app/(staff)/documents/page.tsx`,
+`apps/web/app/(staff)/documents/[id]/page.tsx`, `apps/web/components/crm/evidence-document-link.tsx`.
+
+## ASM-72 — Document Share is additive-only — no "list grants" or "revoke" endpoint exists (Phase F07)
+
+**Date**: 2026-08-24
+**Context**: F07 instruction §14 asks for "list grants, add/revoke access" if the backend
+supports share/access grants. `DocumentsController` has `POST /:id/share`
+(`ShareDocumentDto`: `principalId` + `permissions: ('VIEW'|'DOWNLOAD')[]`) and nothing else —
+no `GET /:id/grants`, no `DELETE /:id/share/:principalId`. `DocumentsService.grant()` is a
+private upsert-only helper.
+**Decision**: `DocumentShareDialog` only grants new access to a new principal; it cannot show
+who currently has access to a document, and there is no revoke action anywhere in the UI.
+**Reason**: A real, backend-side gap, not a frontend omission — building a fake "current
+grants" list would require either a new backend endpoint (out of F07's "no unrelated backend
+work" scope) or client-side guessing, neither acceptable.
+**Affected modules**: `apps/web/components/crm/documents/document-share-dialog.tsx`.
+
+## ASM-73 — Document version history only walks backward (`previousVersionId`), never forward (Phase F07)
+
+**Date**: 2026-08-24
+**Context**: `Document.previousVersionId` is a real scalar FK returned by `GET /documents/:id`;
+`nextVersion` is only a reverse Prisma relation, never selected by `DocumentsService.getById`/
+`findOrThrow` (both call `prisma.document.findUnique` with no `include`). So from any given
+document, the frontend can link to its predecessor, but has no way to discover its successor
+(the newer version created via `createDocumentVersion`) without already knowing that new
+document's id.
+**Decision**: The detail page renders a "Xem phiên bản trước" link when `previousVersionId` is
+set, and nothing when it is the newest known version. Creating a new version explicitly
+navigates the caller to the new row's own detail page (`useCreateDocumentVersion`'s caller,
+not the hook itself, does this) so the forward link is never needed within one session.
+**Reason**: The scalar the API actually returns only supports a linked-list walk in one
+direction; fabricating a "next version" link would require a second, unbuilt backend query.
+**Affected modules**: `apps/web/lib/documents/types.ts`, `apps/web/app/(staff)/documents/[id]/page.tsx`.
+
+## ASM-74 — Notification event→navigation map is transcribed from real `notify(...)` call sites; TASK_* events get no link because no Task detail route exists anywhere in the frontend (Phase F07)
+
+**Date**: 2026-08-24
+**Context**: F07 instruction §18: "Không invent type names," and "nếu backend payload không
+đủ để build navigation... không tự đoán URL." There is no backend enum or list endpoint for
+notification event names — every entry in `NOTIFICATION_EVENT_META`
+(`apps/web/lib/notifications/notification-event-map.ts`) was grepped directly from the eleven
+real `notify(BothChannels)(...)` call sites across `applications.service.ts`,
+`scholarship-applications.service.ts`, `contracts.service.ts`, `payments.service.ts`,
+`tasks.service.ts`, and `visas.service.ts`. Four of the eleven (`TASK_ASSIGNED`/
+`TASK_BLOCKED`/`TASK_DEADLINE_REMINDER`/`TASK_OVERDUE_REMINDER`) carry a real `taskId` in
+their payload, but no F01-F07 phase ever built a standalone staff Task list/detail route —
+Task management exists only as a backend module with no frontend surface at all.
+**Decision**: TASK_* notifications render with their real label/icon but no clickable
+navigation — same "no fabricated URL" treatment §18 mandates for an insufficient payload,
+applied here even though the actual gap is a missing frontend route rather than a missing
+field, since the practical effect (no safe link to build) is identical.
+**Reason**: A link to a nonexistent route is worse than no link — it would 404 or silently
+do nothing, either way misleading the user that navigation happened.
+**Affected modules**: `apps/web/lib/notifications/notification-event-map.ts`.
+
+## ASM-75 — "Mark all read" loops the single-item endpoint over the current page's unread rows only — no bulk endpoint exists (Phase F07)
+
+**Date**: 2026-08-24
+**Context**: `NotificationsController` has exactly two routes: `GET /notifications` and
+`PATCH /notifications/:id/read`. There is no `PATCH /notifications/read-all` or similar.
+**Decision**: The inbox's "Đánh dấu đã đọc (trang này)" bulk action calls the existing
+per-id `markNotificationRead` once for every currently-loaded unread row (`Promise.all`),
+then invalidates the notification query namespace. It is explicitly labeled "(trang này)"
+("this page") and does not reach unread rows on other pages/filters.
+**Reason**: F07 instruction §20 asks for "mark all read nếu backend hỗ trợ" — the backend
+supports it only in the sense that the single-item action can be repeated; inventing a bulk
+endpoint would be out of F07's "no unrelated backend work" scope.
+**Affected modules**: `apps/web/app/(staff)/notifications/page.tsx`.
+
+## ASM-76 — Reports export (`GET /reports/cases/export`) is fully synchronous — no job/status/async-download flow exists (Phase F07)
+
+**Date**: 2026-08-24
+**Context**: F07 instruction §27/§29 describes export as potentially async ("progress if
+async... poll status safely"). `ReportsController.exportCases`/`ReportsService.exportCases`
+return `{ rows, rowCount }` directly from one request — no job is enqueued, no status field,
+no separate download endpoint.
+**Decision**: `/reports`'s export UI shows a plain loading state during the one request, then
+renders the returned rows directly plus a client-side "Tải xuống CSV" button that formats
+those SAME already-authorized, already-scope-filtered, already-audited rows as a file —
+never a second unaudited data pull, never a fabricated progress bar for a request that isn't
+actually async.
+**Reason**: Matches instruction §21's "Frontend chỉ: query, filter, display, export request"
+— the CSV conversion is a display-format transform on data the backend already authorized for
+this exact request, not a new data access.
+**Affected modules**: `apps/web/app/(staff)/reports/page.tsx`, `apps/web/lib/reports/api.ts`.
+
+## ASM-77 — Manager dashboard's per-owner workload rows show a raw `ownerId`, never a resolved name (Phase F07)
+
+**Date**: 2026-08-24
+**Context**: `ReportsService.managerDashboard()` groups `Task` rows by `ownerId` with no
+`User` join (`prisma.task.findMany({ select: { ownerId: true, ... } })`) — the response
+genuinely has no display name field.
+**Decision**: The Manager tab renders `ownerId` as-is (labeled "Người phụ trách (ID)"). No
+second `GET /users` (or similar) call is made to resolve a name for each row.
+**Reason**: F07 instruction §26: "If backend returns a redacted/missing field, do not call
+another endpoint to reconstruct it" — applied here even though the field is simply un-joined
+rather than redacted, since reconstructing it via a second call has the same "manual frontend
+join the backend didn't provide" character the instruction warns against.
+**Affected modules**: `apps/web/app/(staff)/dashboard/page.tsx`, `apps/web/lib/reports/types.ts`.
+
+## ASM-78 — `/dashboard` (KPI views) and `/reports` (export) are two distinct pages, not one (Phase F07)
+
+**Date**: 2026-08-24
+**Context**: F01's route map lists Reports as `/reports` ("or role-routed to the dashboard
+variant above") — phrasing that treats `/dashboard` and `/reports` as interchangeable/
+overlapping, and `/dashboard` already existed as an F01 placeholder pointed at exactly the
+same three report endpoints.
+**Decision**: `/dashboard` was fleshed out into the real role-routed Executive/Manager/Me KPI
+dashboard (F07 instruction §22/§23/§24); `/reports` was built as a separate, focused Export UI
+(F07 instruction §27-§29), gated on `reports:export` specifically rather than `reports:view`.
+The nav item previously labeled "Báo cáo" now reads "Xuất báo cáo" and points at `/reports`.
+**Reason**: The two capabilities (viewing KPIs vs. exporting a scope-filtered case list with a
+required audit reason) have different permission gates (`view` vs. `export`) and different UX
+needs (live dashboard vs. a one-shot form+download) — splitting them avoids a single page
+juggling two very different loading/error/empty state sets, while still satisfying the route
+map's literal two names.
+**Affected modules**: `apps/web/app/(staff)/dashboard/page.tsx`, `apps/web/app/(staff)/reports/page.tsx`,
+`apps/web/components/shell/nav-config.ts`.
+
+## ASM-79 — Portal has no Visa-checklist endpoint at all (Phase F08)
+
+**Date**: 2026-08-24
+**Context**: `PortalController.visa(id, visaId)` calls `PortalService.getVisa`, which calls
+`VisasService.getById(principal, visaId)` and returns the result through `redactVisa` — a
+plain `Visa` row, no `include`. Confirmed directly against the live service: there is no
+`checklist` embed and no separate `GET /portal/students/:id/visa/:visaId/checklist` route
+anywhere in `PortalController`. This is asymmetric with Application, whose Portal detail DOES
+embed `checklist` (`PortalService.getApplication`).
+**Decision**: The Portal Visa detail page renders appointment/interview/result information
+only — no checklist section at all, and no fabricated one.
+**Reason**: Inventing a checklist section from data the endpoint doesn't return would either
+require a new backend endpoint (out of F08's "no new endpoints unless actually required"
+scope) or a misleading empty/wrong UI section.
+**Affected modules**: `apps/web/app/(portal)/portal/students/[id]/visa/[visaId]/page.tsx`.
+
+## ASM-80 — Enrollment and Contract have list-only Portal routes, no per-record detail route (Phase F08)
+
+**Date**: 2026-08-24
+**Context**: `PortalController` has `GET .../enrollment` (list, no `:enrollmentId` sub-route)
+and `GET .../contracts` + `GET .../contracts/:contractId/payments` (list + one nested
+sub-resource, no bare Contract detail route) — matching F01's own route map exactly (which
+never listed a `/portal/students/[id]/enrollment/[enrollmentId]` or `.../contracts/[id]`
+row). Enrollment additionally has zero Portal mutation of any kind (no confirm/withdraw
+route) — Portal is read-only for it end to end.
+**Decision**: The Enrollment page renders every enrollment as a card in one list (no detail
+route); the Contracts page links straight from each contract card to its nested Payments
+route, never a standalone Contract detail page.
+**Reason**: Matches the live backend and F01's route map exactly — no route invented beyond
+what the controller exposes, same "no invented routes" discipline every prior phase followed.
+**Affected modules**: `apps/web/app/(portal)/portal/students/[id]/enrollment/page.tsx`,
+`apps/web/app/(portal)/portal/students/[id]/contracts/**`.
+
+## ASM-81 — Portal notification navigation is Portal-aware, not F07's staff-route event map — and can link TASK_* events F07 never could (Phase F08)
+
+**Date**: 2026-08-24
+**Context**: F07's `notificationEventMeta` (`lib/notifications/notification-event-map.ts`)
+resolves each event to a STAFF-shell route (`/visas/:id`, `/applications/:id`, ...) — correct
+for the staff inbox, but wrong inside `/portal`: clicking a notification there must keep the
+caller inside the Portal shell, at the same student context, never jump them into the staff
+shell. Separately, F07 could never link `TASK_*` events (no staff Task route exists anywhere
+in this app) — but the Portal DOES have a real Task detail route (`/portal/students/[id]/
+tasks/[taskId]`), so the same real `taskId` payload field IS resolvable here.
+**Decision**: A new `portalNotificationHref(event, studentId, payload)`
+(`lib/portal/notification-links.ts`) resolves every real event name to its Portal-route
+equivalent, reusing F07's `notificationEventMeta` only for the icon/label half. `TASK_*`
+events now render as real clickable links in the Portal inbox.
+**Reason**: F08 instruction §25's "related resource navigation" means navigation that
+actually keeps the caller in the experience they're in — a link into the staff shell (which a
+STUDENT_PARENT mostly lacks the grants to use meaningfully) would be a broken experience even
+where the backend would technically allow the request through.
+**Affected modules**: `apps/web/lib/portal/notification-links.ts`,
+`apps/web/app/(portal)/portal/students/[id]/notifications/page.tsx`.
+
+## ASM-82 — Portal Overview composes multiple existing endpoints client-side — no dedicated "portal dashboard" backend endpoint exists (Phase F08)
+
+**Date**: 2026-08-24
+**Context**: F08 instruction §12 asks for an Overview summarizing roadmap/tasks/applications/
+scholarships/visa/pre-departure/enrollment/contracts/notifications in one view.
+`PortalController` has no single aggregate endpoint for this (unlike `ReportsService`'s
+`executiveDashboard`/`managerDashboard`/`myDashboard`, which ARE real backend aggregates) —
+each domain area is its own separate route.
+**Decision**: The Overview page (`/portal/students/[id]`) calls the same per-domain hooks
+every dedicated sub-page uses (roadmap/tasks/applications/scholarships/visas/pre-departure/
+enrollment/contracts), each independently loading/erroring, and renders a short summary card
+per area with a "Xem tất cả" link to the full page. Every number shown is a value one of
+those real responses already carries (a status, `progress`, `isOverdue`, `meta.totalItems`) —
+none is computed by combining values across calls.
+**Reason**: F08 instruction §12's "CRITICAL: Do not calculate business KPIs independently"
+rules out combining/deriving new numbers; calling the same real per-domain endpoints already
+built for the dedicated pages is the only way to populate this view without inventing a
+backend aggregate outside F08's "no new endpoints unless actually required" scope.
+**Affected modules**: `apps/web/app/(portal)/portal/students/[id]/page.tsx`.
+
+## ASM-83 — Evidence submission is always two real backend calls (upload, then submit) — never one invented combined endpoint (Phase F08)
+
+**Date**: 2026-08-24
+**Context**: Both `PortalService.submitMilestoneEvidence` and `.submitChecklistEvidence`
+require a `documentId` that must already exist AND have been uploaded by the calling
+principal themselves (`409 DOCUMENT_NOT_OWNED` via `assertDocumentUploadedBySelf` otherwise)
+— there is no single "upload + attach as evidence" endpoint.
+**Decision**: `EvidenceUploadDialog` (shared by the Roadmap-milestone and
+Application-checklist flows) always calls F07's `uploadDocument` (`POST /documents`) first,
+then the narrow evidence-submit action with the new document's id — reusing F07's upload
+primitive entirely rather than building a second one.
+**Reason**: Matches the real two-step backend contract exactly; a combined "upload as
+evidence" abstraction would hide a real intermediate failure mode (upload succeeds, evidence
+attach fails) behind a single button.
+**Affected modules**: `apps/web/components/portal/evidence-upload-dialog.tsx`.
+
+## ASM-84 — Staff-side parent invite/revoke UI added to the existing Student detail page (Phase F08)
+
+**Date**: 2026-08-24
+**Context**: `POST /students/:studentId/contacts/:contactId/invite` and `.../revoke`
+(`students:edit`-gated) existed on the backend since the Portal-access module was built, but
+no F02-F07 phase ever added buttons for them to the staff `/students/[id]` page (only
+contact-list/create existed, from F03) — with no way to trigger an invite, the Parent
+acceptance flow this phase builds would be untestable end-to-end from the UI.
+**Decision**: Added "Mời vào cổng thông tin"/"Thu hồi quyền truy cập" buttons to the existing
+Liên hệ (Contacts) card, gated the same as the card's own "+ Thêm" button (`students:edit`).
+`devToken` (only ever returned outside production — no email-delivery integration exists yet,
+same documented gap as password reset) is shown once via a persistent toast so staff can
+relay the link manually in this environment.
+**Reason**: F08's own gate allows fixing a previous phase "nếu phát hiện blocker trực tiếp
+ảnh hưởng F08" — a working invite trigger is a direct, minimal-diff prerequisite for the
+Parent journey this phase is required to deliver, not a redesign of F03's page.
+**Affected modules**: `apps/web/app/(staff)/students/[id]/page.tsx`,
+`apps/web/lib/students/{api,hooks}.ts`.
+
+## ASM-85 — `/public/portal/invite/[token]` is the one deliberately unauthenticated route this phase adds (Phase F08)
+
+**Date**: 2026-08-24
+**Context**: F01's route map named this exact path in its "public token-authorized links"
+note as belonging to "whichever phase first implements... Portal invites (F08)" — but no
+`(public)` route group existed anywhere in the app before this phase (only `(auth)`, for
+`/login`).
+**Decision**: Added a new `(public)` route group (mirroring `(auth)/layout.tsx`'s centered-
+card, no-`RequireAuth` style) with this one page. `AcceptParentInvitationDto`'s
+`username`/`password` are rendered as optional fields (whether they're actually required
+depends on a server-side lookup this page cannot perform in advance) — `409
+CREDENTIALS_REQUIRED` guides the caller if they were needed but left blank.
+**Reason**: The raw URL token IS the authorization for this one page (same pattern as every
+other `@Public()` token-redemption route in this app) — wrapping it in `RequireAuth` would be
+actively wrong, not just unnecessary.
+**Affected modules**: `apps/web/app/(public)/layout.tsx`,
+`apps/web/app/(public)/public/portal/invite/[token]/page.tsx`, `apps/web/lib/portal-access/**`.
+
+## ASM-86 — Portal Task redaction is unconditional, not role-varying (Phase F08)
+
+**Date**: 2026-08-24
+**Context**: `FieldPolicyService.redactTaskForPortal` (Phase 11) always nulls
+`blocker`/`qualityScore`/`ownerId`, unlike every other `redact*` method in the same file
+(which check a `*_REDACTED_FOR` role set first). It runs on every Portal Task response
+regardless of Student-vs-Parent — there is no role branch to key off, since neither a
+Student nor a Parent should ever see staff assignment/internal blocker/quality-score data.
+**Decision**: `PortalTask` (`lib/portal/types.ts`) types these three fields as literal `null`
+(not `T | null`) — the frontend type itself documents that they can never be otherwise on
+this response shape, and no UI anywhere attempts to render them.
+**Reason**: Matches the real, unconditional backend behavior exactly (confirmed by reading
+`redactTaskForPortal`'s source directly) rather than defensively typing them as nullable and
+leaving a reader to wonder whether some role sees them.
+**Affected modules**: `apps/web/lib/portal/types.ts`.

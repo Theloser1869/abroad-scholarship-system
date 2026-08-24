@@ -212,6 +212,23 @@ describe('Partners + Commission (e2e)', () => {
       expect(res.body.programId).not.toBeNull();
     });
 
+    /// DEC-12 — list/detail embed a Partner summary + (when `programId` is set) a
+    /// Program/University summary, so a standalone `/partner-programs/:id` page (no
+    /// partner context in its own URL) can still show "partner, university/program"
+    /// without a per-row N+1 fetch (mirrors DEC-09/10/11).
+    it('list and detail embed the Partner + Program/University summary (DEC-12)', async () => {
+      const listRes = await request(app.getHttpServer()).get(`/partners/${partnerAId}/programs`).query({ limit: 50 }).set('Authorization', `Bearer ${directorToken}`);
+      expect(listRes.status).toBe(200);
+      const row = listRes.body.data.find((p: { id: string }) => p.id === partnerProgramAId);
+      expect(row.partner).toEqual({ id: partnerAId, name: expect.any(String), countryCode: expect.any(String) });
+      expect(row.program).toEqual(expect.objectContaining({ id: expect.any(String), degreeLevel: expect.any(String), major: expect.any(String) }));
+      expect(row.program.university).toEqual({ id: expect.any(String), officialName: expect.any(String), countryCode: expect.any(String) });
+
+      const detailRes = await request(app.getHttpServer()).get(`/partner-programs/${partnerProgramAId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(detailRes.body.partner.id).toBe(partnerAId);
+      expect(detailRes.body.program.university.officialName).toEqual(expect.any(String));
+    });
+
     it('CONSULTANT has zero grant (403)', async () => {
       const res = await request(app.getHttpServer()).get(`/partner-programs/${partnerProgramAId}`).set('Authorization', `Bearer ${consultantAToken}`);
       expect(res.status).toBe(403);
@@ -342,6 +359,32 @@ describe('Partners + Commission (e2e)', () => {
       const res = await request(app.getHttpServer()).get(`/students/${studentAId}/partner-links`).set('Authorization', `Bearer ${directorToken}`);
       expect(res.status).toBe(200);
       expect(res.body.data.length).toBeGreaterThan(0);
+    });
+
+    /// DEC-12 — both list contexts embed the OTHER side's summary (Partner-side list needs
+    /// the Student's name; Student-side list needs the Partner's name), plus detail, so
+    /// neither view needs a per-row N+1 fetch (mirrors DEC-09/10/11).
+    it('both list contexts + detail embed the Partner + Student summary (DEC-12)', async () => {
+      const { studentId, caseId } = await createCaseForConsultant();
+      const partner = await createPartner();
+      const created = await request(app.getHttpServer())
+        .post(`/partners/${partner.id}/student-links`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ studentId, caseId, linkType: 'Referral' });
+      expect(created.status).toBe(201);
+
+      const fromPartner = await request(app.getHttpServer()).get(`/partners/${partner.id}/student-links`).set('Authorization', `Bearer ${directorToken}`);
+      const partnerRow = fromPartner.body.data.find((l: { id: string }) => l.id === created.body.id);
+      expect(partnerRow.student).toEqual({ id: studentId, studentCode: expect.any(String), fullName: expect.any(String) });
+      expect(partnerRow.partner).toEqual({ id: partner.id, name: partner.name, countryCode: expect.any(String) });
+
+      const fromStudent = await request(app.getHttpServer()).get(`/students/${studentId}/partner-links`).set('Authorization', `Bearer ${directorToken}`);
+      const studentRow = fromStudent.body.data.find((l: { id: string }) => l.id === created.body.id);
+      expect(studentRow.partner).toEqual({ id: partner.id, name: partner.name, countryCode: expect.any(String) });
+
+      const detailRes = await request(app.getHttpServer()).get(`/partner-student-links/${created.body.id}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(detailRes.body.partner.id).toBe(partner.id);
+      expect(detailRes.body.student.id).toBe(studentId);
     });
 
     it('ADMIN_FINANCE can view but not create (403) — view-only on relationship data', async () => {
@@ -693,6 +736,39 @@ describe('Partners + Commission (e2e)', () => {
         .send({ sourceType: 'Contract', sourceId: contractId });
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe('COMMISSION_RULE_NOT_FOUND');
+    });
+
+    /// DEC-12 — list (both the bare global list and the partner-nested list) and detail
+    /// embed a Partner summary + (nullable-safe) Student summary, so a row can show
+    /// "partner, student/case/application reference" without a per-row N+1 fetch (mirrors
+    /// DEC-09/10/11).
+    it('list (global + partner-nested) and detail embed the Partner + Student summary (DEC-12)', async () => {
+      const partner = await createPartner();
+      await request(app.getHttpServer())
+        .post(`/partners/${partner.id}/commission-rules`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ basis: 'FIXED', currency: 'USD', fixedAmount: 10 });
+      const { studentId } = await createCaseForConsultant();
+      await linkPartnerToStudent(partner.id, studentId);
+      const { contractId } = await createSignedContractWithPayment(studentId);
+      const create = await request(app.getHttpServer())
+        .post(`/partners/${partner.id}/commission-transactions`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ sourceType: 'Contract', sourceId: contractId });
+      expect(create.status).toBe(201);
+
+      const globalList = await request(app.getHttpServer()).get('/commission-transactions').query({ partnerId: partner.id }).set('Authorization', `Bearer ${financeToken}`);
+      const globalRow = globalList.body.data.find((t: { id: string }) => t.id === create.body.id);
+      expect(globalRow.partner).toEqual({ id: partner.id, name: partner.name, countryCode: expect.any(String) });
+      expect(globalRow.student).toEqual({ id: studentId, studentCode: expect.any(String), fullName: expect.any(String) });
+
+      const nestedList = await request(app.getHttpServer()).get(`/partners/${partner.id}/commission-transactions`).set('Authorization', `Bearer ${financeToken}`);
+      const nestedRow = nestedList.body.data.find((t: { id: string }) => t.id === create.body.id);
+      expect(nestedRow.partner.id).toBe(partner.id);
+
+      const detailRes = await request(app.getHttpServer()).get(`/commission-transactions/${create.body.id}`).set('Authorization', `Bearer ${financeToken}`);
+      expect(detailRes.body.partner.name).toBe(partner.name);
+      expect(detailRes.body.student.id).toBe(studentId);
     });
 
     it('RBAC: ADMIN_FINANCE full access; CONSULTANT/SALES_MARKETING/STUDENT_PARENT zero (403)', async () => {

@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Program } from '@prisma/client';
+import { Prisma, Program, University } from '@prisma/client';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult, parseSort } from '../../../common/dto/list-query.dto';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
@@ -8,6 +8,14 @@ import { ProgramQueryDto } from './dto/program-query.dto';
 import { UpdateProgramDto } from './dto/update-program.dto';
 
 const SORTABLE_FIELDS = ['major', 'degreeLevel', 'createdAt', 'lastVerifiedAt'] as const;
+
+/// DEC-11 — mirrors DEC-09/DEC-10's `STUDENT_SUMMARY_SELECT` exactly. Program list/detail
+/// is core F05 UX ("Hiển thị: university, program name...") and only carried `universityId`
+/// (a bare FK) before this — every list row would otherwise need its own N+1 fetch to show
+/// which university a program belongs to.
+const UNIVERSITY_SUMMARY_SELECT = { select: { id: true, officialName: true, countryCode: true } } as const;
+
+export type ProgramWithUniversity = Program & { university: Pick<University, 'id' | 'officialName' | 'countryCode'> };
 
 /// 08-admission/01_MASTER_DATA.md. Must belong to exactly one University (FK) — "Không
 /// duplicate Program chỉ vì nhiều application"; Application references a Program by ID,
@@ -19,7 +27,7 @@ export class ProgramsService {
     private readonly idGenerator: IdGeneratorService,
   ) {}
 
-  async list(query: ProgramQueryDto): Promise<PaginatedResult<Program>> {
+  async list(query: ProgramQueryDto): Promise<PaginatedResult<ProgramWithUniversity>> {
     const { field, direction } = parseSort(query.sort, SORTABLE_FIELDS, { field: 'major', direction: 'asc' });
     const page = query.page ?? 1;
     const limit = query.limit ?? DEFAULT_PAGE_SIZE;
@@ -39,13 +47,13 @@ export class ProgramsService {
     };
 
     const [data, totalItems] = await this.prisma.$transaction([
-      this.prisma.program.findMany({ where, orderBy: { [field]: direction }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.program.findMany({ where, orderBy: { [field]: direction }, skip: (page - 1) * limit, take: limit, include: { university: UNIVERSITY_SUMMARY_SELECT } }),
       this.prisma.program.count({ where }),
     ]);
-    return new PaginatedResult(data, new PageMeta(page, limit, totalItems));
+    return new PaginatedResult(data as ProgramWithUniversity[], new PageMeta(page, limit, totalItems));
   }
 
-  async getById(id: string): Promise<Program> {
+  async getById(id: string): Promise<ProgramWithUniversity> {
     return this.findOrThrow(id);
   }
 
@@ -132,8 +140,8 @@ export class ProgramsService {
     }
   }
 
-  private async findOrThrow(id: string): Promise<Program> {
-    const program = await this.prisma.program.findUnique({ where: { id } });
+  private async findOrThrow(id: string): Promise<ProgramWithUniversity> {
+    const program = await this.prisma.program.findUnique({ where: { id }, include: { university: UNIVERSITY_SUMMARY_SELECT } });
     if (!program) throw new NotFoundException({ code: 'PROGRAM_NOT_FOUND', message: `Program ${id} not found.` });
     return program;
   }

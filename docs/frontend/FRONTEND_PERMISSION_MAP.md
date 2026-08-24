@@ -1,4 +1,4 @@
-# FRONTEND PERMISSION MAP — Phase F01 (designed), implemented F02, consumed F03, F04
+# FRONTEND PERMISSION MAP — Phase F01 (designed), implemented F02, consumed F03, F04, F05, F06, F07, F08
 
 **Status**: this document's data is now real code — `lib/permissions/rbac-data.ts`
 (`ROLE_GRANTS`, `STUDENT_CASE_SCOPE`/`LEAD_SCOPE`/`CONTRACT_PAYMENT_SCOPE`) and
@@ -37,6 +37,65 @@ role — verified directly against the live `@RequirePermission` decorators duri
   the whole form's native submission for any role without `users:view` even when the field
   itself was optional. Fixed at the component level (`required={false}` passed from those two
   call sites) rather than patched around in each dialog.
+
+**F05**: every Admission action (University/Program/ScholarshipMaster master-data curation;
+University Choice/Application/Offer/ScholarshipApplication transaction) is gated the same way.
+`rbac-data.ts`'s existing `admission_master`/`university_choices`/`applications`/`offers`/
+`scholarship_applications` grants (transcribed in F02/F03, populated ahead of this phase)
+already matched the backend exactly for every F05 role and action — including `verify` as its
+own distinct `admission_master` action, separate from `edit` — verified directly against the
+live `@RequirePermission` decorators; **no `rbac-data.ts` change was needed this phase either**.
+No new `UserPicker`/`users:view`-shaped gap this phase: `ProgramPicker`/`UniversityPicker`/
+`ScholarshipMasterPicker` (new F05 search pickers for `programId`/`universityId`/
+`scholarshipMasterId` fields) never needed a manual-UUID fallback, because every role that can
+create a University Choice, Application, or ScholarshipApplication also holds
+`admission_master:view` (confirmed by cross-checking every role's grant set) — `admission_master`
+is GLOBAL, permission-gated catalog data with no per-record scope, unlike `students`/`users`.
+`ChecklistItemDialog`'s owner field reuses `UserPicker` with `required={false}` (the F04-fixed
+prop), same pattern as `MilestoneFormDialog`/`WritingArtifactFormDialog`.
+
+**F06**: every Visa/Pre-departure/Enrollment/Partner action (Visa FSM/checklist/result;
+VisaChecklistTemplate master-data curation; Pre-departure checklist; Enrollment
+create/edit/confirm/withdraw; Partner/PartnerProgram/PartnerDocument/PartnerStudentLink/
+CommissionRule/CommissionTransaction curation and FSM) is gated the same way. `rbac-data.ts`'s
+existing `visa`/`visa_checklist_templates`/`pre_departure`/`enrollment`/`partner`/
+`partner_programs`/`partner_documents`/`partner_student_links`/`commission_rules`/
+`commission_transactions` grants (transcribed in F02, populated ahead of this phase) already
+matched the backend exactly for every F06 role and action — verified directly against the live
+`@RequirePermission` decorators for every controller; **no `rbac-data.ts` change was needed this
+phase either**. `Partner.internalNotes` redacts for DOCUMENT_SPECIALIST (a different role than
+every other F04-F06 `internalNotes` redaction, which all target STUDENT_PARENT) — rendered
+exactly as returned, same pattern as every other redacted field. `PartnerStudentLinkFormDialog`
+reuses `StudentPicker` (no new picker gap this phase); `EnrollmentFormDialog`/
+`VisaFormDialog`/`CommissionTransactionCreateDialog`'s manual-UUID linkage fields
+(`offerId`/`sourceId`/`commissionRuleId`/etc.) follow the same "manual UUID for a narrow linkage
+field with no dedicated picker" precedent F04/F05 established for evidence-document fields.
+
+**F07**: Document/Notification/Reporting actions are gated the same way, with one structural
+difference — **Notifications has no backend permission resource at all**
+(`NotificationsController` declares no `@RequirePermission`; every authenticated role reads/
+marks-read only its own inbox, enforced by `recipientId === principal.userId` inside the
+service, not by a grant check). `nav-config.ts`'s `NavItem.resource`/`action` were widened to
+`optional` this phase specifically for the "Thông báo" nav item — the first F02-F06 nav item
+with no backend permission gate at all; `Sidebar` shows it to every authenticated role. Every
+other F07 resource (`documents`, `reports`) reused `rbac-data.ts`'s existing grants
+(transcribed in F02, populated ahead of this phase) with **no `rbac-data.ts` change needed**
+— verified directly against the live `@RequirePermission` decorators on
+`DocumentsController`/`ReportsController`. `reports:export` is narrower than `reports:view`
+(ED/DM only vs. every staff role) — the Dashboard (`/dashboard`, `reports:view`) and Export
+(`/reports`, `reports:export`) pages are gated separately to reflect this. `DocumentShareDialog`
+reuses `UserPicker` (no new picker gap this phase).
+
+**F08**: The entire Portal surface is gated by a SINGLE permission (`portal:access`, granted
+only to STUDENT_PARENT) at the `(portal)/portal` layout level — no per-domain-area grant
+exists or is checked inside `/portal/...` pages (unlike every staff page, which gates
+individual actions). The real, per-request authorization for WHICH student's data a given
+STUDENT_PARENT may see is entirely record-scope-based (`ScopePolicyService.
+assertStudentAccessible`, OWN_STUDENT/revocation-aware), not a second permission — `rbac-data.ts`
+needed **no change** for this phase; `portal: ["access"]` already existed from F02. The one
+narrow addition was to `nav-config.ts`'s STAFF-SHELL nav (unrelated to Portal itself): the new
+"Thông báo" item is the first with no `resource`/`action` at all (F07), reused as prior art,
+not a new pattern this phase introduced.
 
 **This document is UX guidance only.** It exists so a future phase can decide what nav items/
 buttons to show or hide per role. **It is not, and must never become, the security

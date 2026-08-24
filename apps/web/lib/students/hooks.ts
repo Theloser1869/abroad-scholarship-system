@@ -112,3 +112,19 @@ export function useCreateStudentContact(studentId: string) {
     },
   });
 }
+
+export function useInviteParent(studentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (contactId: string) => studentsApi.inviteParent(studentId, contactId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.students.contacts(studentId) }),
+  });
+}
+
+export function useRevokeParentAccess(studentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (contactId: string) => studentsApi.revokeParentAccess(studentId, contactId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.students.contacts(studentId) }),
+  });
+}

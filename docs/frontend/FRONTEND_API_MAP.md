@@ -1,4 +1,4 @@
-# FRONTEND API MAP — Phase F01 (designed), implemented F02, extended F03, extended F04
+# FRONTEND API MAP — Phase F01 (designed), implemented F02, extended F03, extended F04, extended F05, extended F06, extended F07, extended F08
 
 **Status**: §1's conventions are now real, working code — `lib/api/client.ts`
 (`apiFetch`/`apiUpload`/`apiDownloadBlob`/`resolveApiUrl`, single-flight refresh, timeout,
@@ -11,8 +11,12 @@ call layers: `lib/leads/api.ts`, `lib/students/api.ts`, `lib/cases/api.ts`. F04 
 `requestDocumentDownload` only — F04 integrates document *links*, it does not rebuild the
 Document subsystem, F07 scope) — each a thin wrapper over `apiFetch`, per §1's rule that this
 file is the only module allowed to call `fetch`, plus matching TanStack Query hooks with scoped
-cache invalidation (§7 "Query / cache"). Every other domain in §2's mapping table below remains
-F05+ scope.
+cache invalidation (§7 "Query / cache"). F05 added `lib/universities/`, `lib/programs/`,
+`lib/scholarship-masters/`, `lib/university-choices/`, `lib/applications/`, `lib/offers/`,
+`lib/scholarship-applications/` — same thin-wrapper-plus-hooks pattern, reusing F04's
+`EvidenceDocumentLink`/`lib/documents/` for every document reference (`evidenceDocumentId`/
+`documentId`) rather than rebuilding anything. Every other domain in §2's mapping table below
+remains F06+ scope.
 
 ### F03 backend fix (DEC-09) — owner/student relation summaries
 
@@ -62,6 +66,247 @@ phase's own instruction):
   *add* a dependency (picking from the roadmap's own already-loaded milestone list); *removing*
   one is not reachable from the UI since there is no way to discover which dependencies exist
   without inventing client-side state tracking — documented limitation, not a silent gap.
+
+### F05 backend fix (DEC-11) — Program/Application/UniversityChoice/ScholarshipApplication parent-entity summaries
+
+Same gap as DEC-09/DEC-10, found in four places at once: `GET /programs`/`GET /programs/:id`
+(bare `universityId`), `GET /cases/:caseId/applications`/`GET /applications/:id` (bare
+`programId`), `GET /students/:studentId/university-choices`/`GET /university-choices/:id` (bare
+`programId`), `GET /cases/:caseId/scholarship-applications`/`GET /scholarship-applications/:id`
+(bare `scholarshipMasterId`). Fixed identically four times (`UNIVERSITY_SUMMARY_SELECT`/
+`PROGRAM_SUMMARY_SELECT` (×2, declared locally per service)/`SCHOLARSHIP_MASTER_SUMMARY_SELECT`
+on each service's `list()`/`getById()` only; `FieldPolicyService.redactScholarshipApplication`
+made generic over `T extends ScholarshipApplication`, same fix shape as DEC-10's
+`redactContract`, since it's the only one of the four entities with any field redaction at all)
+— see `docs/DECISIONS.md` DEC-11. Frontend types: `lib/programs/types.ts`'s
+`ProgramUniversitySummary`/`ProgramSummary` (the latter reused, not duplicated, by
+`lib/university-choices/types.ts` and `lib/applications/types.ts`), `lib/scholarship-applications/
+types.ts`'s `ScholarshipApplicationMasterSummary`.
+
+### F05 implementation notes / discrepancies
+
+Confirmed directly against the live controllers/services (implementation is source of truth per
+this phase's own instruction) — cross-checked against `docs/api/API_CONVENTIONS.md` and
+`docs/security/RBAC_MATRIX.md`, both of which matched the live code exactly for every Admission
+route/permission/status code (**no doc-vs-code discrepancy found** in either document itself):
+
+- **Duplicate-detection 409s carry a single `existing*Id`, never a candidates array** —
+  `DUPLICATE_UNIVERSITY`/`DUPLICATE_PROGRAM`/`DUPLICATE_SCHOLARSHIP_MASTER`/
+  `DUPLICATE_UNIVERSITY_CHOICE` all resolve to exactly one conflicting record (confirmed against
+  every `assertNoDuplicate` implementation). The shared `DuplicateConflictNotice` component
+  therefore links to the one existing record (when a detail route exists — never for
+  UniversityChoice, see below), never a multi-candidate picker.
+- **The real duplicate-active-application error code is `ACTIVE_APPLICATION_EXISTS`**, not
+  "DUPLICATE_APPLICATION" as some planning documents assume (`docs/DECISIONS.md` DEC-05's own
+  original naming). Code wins.
+- **`Offer.respond` is NOT idempotent** — `OffersService.respond` requires `status === 'RECEIVED'`;
+  a second accept/decline on an already-resolved offer is a genuine `409 INVALID_OFFER_STATE`,
+  e2e-confirmed. The `OfferRespondDialog`/Offer detail page render this as a real error (and
+  additionally disable the Accept/Decline buttons once `status !== 'RECEIVED'`), never treating a
+  repeat response as a silent success.
+- **`OfferStatus.WITHDRAWN` exists in the Prisma enum but no current backend code path ever sets
+  it** — rendered defensively (`OFFER_STATUS_VARIANT`/`OFFER_STATUS_LABEL` both cover it) but no
+  UI action produces it.
+- **UniversityChoice is student-scoped (`/students/:studentId/university-choices`), not
+  case-scoped** — `caseId` is only an optional linkage field on the record, confirmed against
+  both the live route (`StudentUniversityChoicesController`) and the service's own scope check
+  (`assertStudentAccessible` unconditionally, `assertCaseAccessible` only when `caseId` is set).
+  This overrides the "Case ID là source of scope" assumption in the F05 mega-prompt's own §12.
+- **UniversityChoice has no standalone detail route** — no `/university-choices/[id]` was mapped
+  in F01's `FRONTEND_ROUTES.md`, so edit/review are Dialogs launched from the student-scoped
+  list, same "no invented route" precedent as F04's Payment. `UniversityChoiceFormDialog`'s
+  duplicate-conflict notice therefore shows the message only, no link.
+- **UniversityChoice's `status` field has no dedicated FSM action** — `PATCH
+  /university-choices/:id` accepts `status` as a plain field (unlike every other F04/F05
+  status-carrying entity, which always has a dedicated action or a generic-status endpoint
+  distinct from its own `PATCH`). Confirmed directly against the DTO and controller; the list
+  page's inline `<select>` PATCHes it directly, matching the backend's own shape rather than
+  inventing a dedicated-action UI pattern that doesn't exist server-side.
+- **Application/ScholarshipApplication's generic status-transition 409s both include the real
+  `allowedTransitions` array** (`INVALID_APPLICATION_STATUS_TRANSITION`/
+  `INVALID_SCHOLARSHIP_APPLICATION_STATUS_TRANSITION`) — both status dialogs render it verbatim,
+  same "surface the exact unmet/allowed list" precedent F04 established for Milestone's
+  `PREREQUISITE_NOT_DONE`.
+- **ScholarshipApplication eligibility is two plain fields on the entity itself**
+  (`eligibilityConfirmed`/`eligibilityNotes`), not a separate eligibility-check endpoint — set
+  together via `confirm-eligibility`; the Submit-blocking gate is simply "hide/disable until
+  `eligibilityConfirmed === true`," server-independently re-enforced via `409
+  ELIGIBILITY_NOT_CONFIRMED` if bypassed.
+- **Award never links a Contract/Payment record** — `AwardScholarshipDto`/the `ScholarshipApplication`
+  model carry no `contractId`/`paymentId` field at all (confirmed against `schema.prisma`), so
+  there is nothing to accidentally cross-link even in principle.
+- **`GET /applications/:applicationId/checklist` exists as its own endpoint** but the Application
+  detail page never calls it separately — `GET /applications/:id` already embeds `checklist` via
+  Prisma `include`, so the checklist section reads from the already-loaded detail response; the
+  standalone endpoint is still wired in `lib/applications/api.ts` (used by the checklist item
+  create/update hooks' cache-invalidation target) but not fetched independently.
+
+### F06 backend fix (DEC-12) — Enrollment/PartnerProgram/PartnerStudentLink/CommissionTransaction parent-entity summaries
+
+Same gap as DEC-09/10/11, found in four places at once: `GET /cases/:caseId/enrollments`/
+`GET /enrollments/:id` (bare `universityId`/`programId`), `GET /partners/:id/programs`/
+`GET /partner-programs/:id` (bare `partnerId`, optional bare `programId`), `GET /partners/:id/
+student-links` + `GET /students/:id/partner-links`/`GET /partner-student-links/:id` (bare
+`partnerId`/`studentId`), `GET /commission-transactions` (+ partner-nested variant)/
+`GET /commission-transactions/:id` (bare `partnerId`, nullable bare `studentId`). Fixed
+identically four times (`UNIVERSITY_SUMMARY_SELECT`+`PROGRAM_SUMMARY_SELECT`/
+`PARTNER_SUMMARY_SELECT`+`PROGRAM_SUMMARY_SELECT` (nested into University)/
+`PARTNER_SUMMARY_SELECT`+`STUDENT_SUMMARY_SELECT` (×2, declared locally per service) on each
+service's list/detail paths only; `FieldPolicyService.redactEnrollment` made generic over
+`T extends Enrollment`, same fix shape as DEC-10's `redactContract`/DEC-11's
+`redactScholarshipApplication`, since it's the only one of the four entities with any field
+redaction at all) — see `docs/DECISIONS.md` DEC-12. Frontend types: `lib/enrollments/types.ts`'s
+embedded `university`/`program` (reusing `ProgramUniversitySummary` from `lib/programs/types.ts`),
+`lib/partner-programs/types.ts`'s `PartnerProgramPartnerSummary`/`PartnerProgramProgramSummary`,
+`lib/partner-student-links/types.ts`'s `PartnerStudentLinkPartnerSummary`/
+`PartnerStudentLinkStudentSummary`, `lib/commission-transactions/types.ts`'s
+`CommissionTransactionPartnerSummary`/`CommissionTransactionStudentSummary`.
+
+### F06 implementation notes / discrepancies
+
+Confirmed directly against the live controllers/services/`schema.prisma` (implementation is
+source of truth per this phase's own instruction) — cross-checked against
+`docs/api/API_CONVENTIONS.md` and `docs/security/RBAC_MATRIX.md`, both of which matched the live
+code exactly for every Visa/Pre-departure/Enrollment/Partner route/permission/status code (**no
+doc-vs-code discrepancy found** in either document itself):
+
+- **Pre-departure is not a separate model** — `VisaChecklistItem` is polymorphic
+  (`entityType: 'Visa' | 'PreDeparture'`, `entityId` = a Visa's id or, for Pre-departure, the
+  Case's id directly), shared with Visa's own checklist and reusing F05's
+  `ChecklistItemStatus` enum. `PreDepartureService.listForCase()` returns a plain
+  `VisaChecklistItem[]`; there is no separate PreDeparture model in `schema.prisma` at all, and
+  no "mark pre-departure complete" action — completeness is enforced only at Case Closure (`409
+  PRE_DEPARTURE_CHECKLIST_INCOMPLETE`, pre-existing F03/F04 scope). See ASM-69.
+- **Enrollment's `universityId`/`programId` are derived server-side from the Offer**, never
+  client-supplied — `CreateEnrollmentDto` accepts only `offerId`/`startDate`/
+  `evidenceDocumentId`. Offer validity (must belong to the Case, must be ACCEPTED) is enforced
+  at Enrollment-create time via `409 INVALID_ENROLLMENT_TARGET`, not a separate validity-check
+  endpoint. See ASM-70.
+- **`CONFIRMED_ENROLLMENT_EXISTS` enforces at-most-one-CONFIRMED-Enrollment-per-Case** — a real
+  409 with `existingEnrollmentId`, surfaced verbatim by `EnrollmentConfirmDialog`, never
+  pre-checked client-side.
+- **PartnerDocument is its own model wrapping a REQUIRED `documentId` FK**, not literally
+  Document rows — carries `type`/`version`/`status`/`effectiveDate`/`expiryDate`/`ownerId`
+  metadata. `@@unique([partnerId, type, version])`, auto-incremented per new `create()` call;
+  editable only while DRAFT (`409 PARTNER_DOCUMENT_NOT_EDITABLE` otherwise); `activate`
+  atomically supersedes the prior ACTIVE row for the same `(partnerId, type)` → SUPERSEDED. A
+  correction after signing is a whole new version row, never an in-place edit.
+- **CommissionRule cross-validates `basis` vs `percentageRate`/`fixedAmount` server-side** (400
+  `FIXED_AMOUNT_REQUIRED`/`PERCENTAGE_RATE_REQUIRED`/`FIXED_AMOUNT_NOT_ALLOWED`/
+  `PERCENTAGE_RATE_NOT_ALLOWED`) — `CommissionRuleFormDialog` mirrors this as UX guidance
+  (hiding the irrelevant input) but never substitutes for the real server-side check.
+  Rule-matching/precedence (`CommissionRulesService.selectRuleFor`) is 100% backend-internal,
+  never exposed via any endpoint or previewed client-side.
+- **CommissionTransaction's `calculate()` performs authoritative `Prisma.Decimal` math
+  server-only** (`basisAmount.times(percentageRate).toDecimalPlaces(2, ROUND_HALF_UP)`) —
+  confirms "no client-side money calculation" is structural here, not just a style rule; the
+  detail page's "Tính toán" action only calls the endpoint and renders whatever
+  `calculatedAmount` comes back via the shared `Money` component.
+- **`409 PARTNER_STUDENT_LINK_REQUIRED` is a real, non-obvious precondition** — commission
+  cannot be attributed to a partner with no active PartnerStudentLink to the source student,
+  surfaced verbatim by `CommissionTransactionDetailContent`, never pre-validated client-side.
+- **`409 INVALID_COMMISSION_TRANSACTION_STATE` uses a prose message, not an `allowedTransitions`
+  array** — unlike Visa/Application/ScholarshipApplication's generic status-transition 409s
+  (confirmed directly against the live service), so `crmErrorMessage`'s mapped text is shown
+  as-is with no allowed-list rendering, a deliberate difference from `VisaStatusDialog`'s pattern.
+- **PartnerStudentLink has two independent list contexts reaching the same underlying rows**
+  (`/partners/:id/student-links` and `/students/:id/partner-links`) — both `usePartnerStudentLinksForPartner`
+  and `usePartnerStudentLinksForStudent` hit the identical `PartnerStudentLink` shape via
+  DEC-12's shared `paginate()` fix; the Student detail page's read-only "Đối tác liên kết" card
+  uses the student-scoped list, the Partner detail page's editable section uses the
+  partner-scoped one.
+- **`Partner.internalNotes` redacts for DOCUMENT_SPECIALIST**, a different role than every other
+  F04-F06 `internalNotes` redaction (which all target STUDENT_PARENT) — confirmed directly
+  against `FieldPolicyService.redactPartner`.
+
+### F07 implementation notes / discrepancies
+
+Confirmed directly against the live `DocumentsController`/`DocumentsService`,
+`NotificationsController`/`NotificationsService`, `ReportsController`/`ReportsService`, and
+`schema.prisma`. Unlike every prior domain phase, **F07 required zero backend changes** — no
+DEC entry, no service edit, no e2e spec touch. Every real limitation found below is a
+pre-existing backend-shape gap (documented as ASM-71 through ASM-78), not something a small
+service fix could close within F07's "no unrelated backend work" scope:
+
+- **`DocumentsController` has no `GET /documents` list route at all** — not even an
+  owner-entity-scoped one. `DocumentsService.listAccessibleTo()` exists but is dead code from
+  the controller's perspective (Portal has its own, separate document-listing endpoint,
+  F08 scope). The `/documents` hub is a lookup-by-id + upload entry point, never a browser. See
+  ASM-71.
+- **Document Share (`POST /:id/share`) is additive-only** — no "list current grants" or
+  "revoke" endpoint exists (`ShareDocumentDto` only grants VIEW/DOWNLOAD to a new principal).
+  See ASM-72.
+- **Document version history only has a `previousVersionId` scalar, never a `nextVersionId`**
+  — `nextVersion` is a Prisma relation, never selected by `getById`/`findOrThrow`. The detail
+  page can only link to a document's predecessor, never discover its successor. See ASM-73.
+- **`GET /documents/:id` returns the raw scalar `Document` row** — no field redaction exists
+  for Document anywhere in `FieldPolicyService` (confirmed by grep — zero matches); access
+  control is entirely grant-based (already true since F04), not field-level.
+- **There is no notification "type" enum or list endpoint** — every entry in
+  `NOTIFICATION_EVENT_META` was transcribed directly from the real `notify(BothChannels)(...)`
+  call sites across six service files, never invented. Four of eleven real event names
+  (`TASK_*`) carry a real `taskId` but have no frontend Task route to link to at all — this is
+  a missing frontend surface (Task management was never built as a standalone route through
+  F07), not a backend gap. See ASM-74.
+- **`NotificationsController` has no bulk "mark all read" route** — only
+  `PATCH /notifications/:id/read`, one at a time. See ASM-75.
+- **`GET /reports/cases/export` is fully synchronous** — `{ rows, rowCount }` returned directly
+  from one request; no job/queue/status-polling infrastructure exists for it (unlike
+  `DOCUMENT_SCAN_JOB_TYPE`/`EMAIL_DISPATCH_JOB_TYPE`, which ARE real queued jobs elsewhere in
+  this same backend). See ASM-76.
+- **`ReportsService.managerDashboard()`'s per-owner workload has no `User` join** — `ownerId`
+  is the only identifying field per row; the frontend does not call `GET /users` to resolve a
+  display name (would be a manual frontend join the backend didn't provide). See ASM-77.
+- **`ReportsService.executiveDashboard()`/`managerDashboard()` both allow EITHER
+  EXECUTIVE_DIRECTOR or DEPARTMENT_MANAGER** — there is no ED-only vs. DM-only split on the
+  backend; the Dashboard page's tab switch is available to both roles identically.
+- **Revenue/receivables are grouped by currency, never summed** (`ReportsService`'s own Phase
+  14 fix, cited in its source comment) — the frontend renders each `{currency, amount}` pair
+  via `Money` individually, never adds them together.
+
+### F08 implementation notes / discrepancies
+
+Confirmed directly against the live `PortalController`/`PortalService`/`PortalAccessService`
+and every domain service Portal delegates into. **F08 required zero backend changes** — the
+second domain phase (after F07) with no DEC entry:
+
+- **`PortalService` resolves `principal → allowed Student → latest Case` server-side on every
+  Case-scoped call** (`resolveCase`) — the frontend never trusts `:id` from the URL as
+  authorized; every sub-page's own data call independently re-verifies via `PortalStudentShell`
+  first (`GET /portal/students/:id`, the same 404-on-unauthorized this whole surface relies on).
+- **Portal has no Visa-checklist endpoint** — `getVisa` returns a plain `Visa`, no `include`.
+  See ASM-79.
+- **Enrollment/Contract are list-only on the Portal side** — no detail route for either, no
+  Enrollment mutation at all. See ASM-80.
+- **There is no `GET /portal/dashboard`-style aggregate endpoint** — the Overview page
+  composes the same per-domain endpoints every dedicated sub-page uses. See ASM-82.
+- **Evidence submission (`.../roadmap/milestones/:id/evidence`,
+  `.../applications/checklist/:id/evidence`) requires the document to have been uploaded by
+  the calling principal themselves** (`409 DOCUMENT_NOT_OWNED` via
+  `PortalService.assertDocumentUploadedBySelf` otherwise) — always a fresh F07 `uploadDocument`
+  call first, never re-attaching an already-shared document. See ASM-83.
+- **`PortalUpdateTaskStatusDto` accepts only `IN_PROGRESS`/`DONE`** — narrower than the full
+  staff `TaskStatus` enum; BLOCKED/CANCELLED/NOT_STARTED stay staff-only, but the underlying
+  FSM (`TasksService.applyStatusTransition`) is the exact same one, so a `409
+  INVALID_TASK_STATUS_TRANSITION`/`BLOCKER_REQUIRED` is still always possible and surfaced
+  verbatim.
+- **`FieldPolicyService.redactTaskForPortal` is unconditional**, not role-varying like every
+  other `redact*` method — `blocker`/`qualityScore`/`ownerId` are always `null` regardless of
+  Student-vs-Parent. See ASM-86.
+- **`GET /portal/me` is the sole source of the linked-child list** — `relationship` is
+  `"SELF"` when the caller IS the student, or the real `StudentContact.relationship` text
+  otherwise; never inferred from email/name/role.
+- **Notification navigation from inside `/portal` is Portal-aware**, not F07's staff-route
+  event map — a new `portalNotificationHref` resolves the same real event names to
+  `/portal/students/:id/...` destinations, and can link `TASK_*` events (a real Portal Task
+  route exists) that F07's staff inbox never could. See ASM-81.
+- **The staff-side Parent invite/revoke trigger did not exist before this phase** — added to
+  the existing `/students/[id]` page's Contacts card (`students:edit`-gated, same as its
+  existing "+ Thêm" button). See ASM-84.
+- **`/public/portal/invite/[token]`** is the one deliberately unauthenticated route this phase
+  adds, `@Public()`-backed (`PublicParentInvitationsController`) — the raw token IS the
+  authorization, same pattern as every other public token-redemption link in this app. See
+  ASM-85.
 
 Source of truth for every convention/shape below: `docs/api/API_CONVENTIONS.md` +
 `apps/api/src/**`. Nothing here invents an endpoint, field, or behavior not already
@@ -204,17 +449,17 @@ name.
 | Roadmaps | `roadmaps` | reuses Student/Case `ROLE_SCOPE` | list per Case (plain array), detail incl. `milestones` | **Implemented F04**: `/cases/[caseId]/roadmaps`, `/roadmaps/[id]` — submit/approve/reject/status, milestone create/edit/status/add-dependency inline on the roadmap detail page (no separate milestone route) |
 | Profile evidence (Academic/Test/Competition/Research/Activity) | `profile_evidence` | reuses Student/Case `ROLE_SCOPE` | list per Case per sub-type (5 plain arrays) | **Implemented F04**: `/cases/[caseId]/profile` (tabbed) — create/edit per sub-type, `verify` (Academic/Test/Activity only, gated on `profile_evidence:edit`, not a distinct action), duplicate-test-attempt conflict (`409 DUPLICATE_TEST_ATTEMPT`) surfaced verbatim |
 | Writing (Artifact/Version/LOR) | `writing` | reuses Student/Case `ROLE_SCOPE` | list per Case (plain array), detail incl. `versions` | **Implemented F04**: `/cases/[caseId]/writing-artifacts`, `/writing-artifacts/[id]` — status FSM, new-version-only (no content edit endpoint exists), per-version review + Comment-entity-backed feedback (reuses F03's Comment API). LOR tracking is a card on the list page (no dedicated route — F01 never mapped one) |
-| Admission master data | `admission_master` (University/Program/ScholarshipMaster) | GLOBAL, permission-gated only (shared catalog, no per-record scope) | list/detail | `create`/`edit`/`verify` ED/DM-only; `verify` is its own action, distinct from `edit` |
-| University choices / Applications / Offers / Scholarship applications | `university_choices`, `applications`, `offers`, `scholarship_applications` | reuse Student/Case `ROLE_SCOPE` (Offer resolves one hop through parent Application) | list/detail, ScholarshipApplication field-redacted (`internalNotes`) for STUDENT_PARENT | Application `submit` requires every required checklist item DONE/WAIVED (409 otherwise); Offer `respond` is ACCEPT/DECLINE only |
+| Admission master data | `admission_master` (University/Program/ScholarshipMaster) | GLOBAL, permission-gated only (shared catalog, no per-record scope) | list/detail | **Implemented F05**: `/universities`, `/programs`, `/scholarship-masters` — `create`/`edit`/`verify` ED/DM-only; `verify` is its own action, distinct from `edit`. `409 DUPLICATE_UNIVERSITY`/`DUPLICATE_PROGRAM`/`DUPLICATE_SCHOLARSHIP_MASTER` each carry a single `existing*Id` (never a candidates array — confirmed against the live `assertNoDuplicate` implementations), surfaced via the shared `DuplicateConflictNotice` component with a link to the real conflicting record |
+| University choices / Applications / Offers / Scholarship applications | `university_choices`, `applications`, `offers`, `scholarship_applications` | reuse Student/Case `ROLE_SCOPE` (Offer resolves one hop through parent Application; UniversityChoice is **student**-scoped via `/students/:studentId/university-choices`, not case-scoped, though it carries an optional `caseId` linkage) | list/detail, ScholarshipApplication field-redacted (`internalNotes`) for STUDENT_PARENT; Program/Application/UniversityChoice/ScholarshipApplication list+detail additionally embed a parent-entity summary (DEC-11) | **Implemented F05**: Application `submit` requires every required checklist item DONE/WAIVED (`409 CHECKLIST_INCOMPLETE` otherwise, never pre-checked client-side); duplicate-active-application is `409 ACTIVE_APPLICATION_EXISTS` (not "DUPLICATE_APPLICATION" — a real code-vs-planning-doc discrepancy, code wins); Offer `respond` is ACCEPT/DECLINE only and **is NOT idempotent** — a second response to an already-resolved offer is a genuine `409 INVALID_OFFER_STATE`, rendered as a real error, never treated as a silent success; ScholarshipApplication eligibility is two plain fields on the entity (`eligibilityConfirmed`/`eligibilityNotes`, set via `confirm-eligibility`), not a separate endpoint; `award`/`reject` reachable only from UNDER_REVIEW/INTERVIEW, never linking a Contract/Payment record |
 | Visa / Enrollment | `visa`, `visa_checklist_templates` (GLOBAL master data), `pre_departure`, `enrollment` | reuse Student/Case `ROLE_SCOPE`, both `caseId`-required | list/detail, field-redacted (`internalNotes`) for STUDENT_PARENT | Visa has dedicated `submit`/`appointment`/`interview`/`result` actions, never a bare status PATCH |
 | Partners / Commission | `partner`, `partner_programs`, `partner_documents`, `partner_student_links`, `commission_rules`, `commission_transactions` | GLOBAL, permission-gated only — **no Case-membership layer at all**, unlike every domain above | list/detail, Partner field-redacted (`internalNotes`) for DOCUMENT_SPECIALIST | CommissionTransaction has a long dedicated FSM (`confirm-eligibility → calculate → approve → mark-payable → pay`, or `cancel`) — never a bare status PATCH |
-| Documents | `documents` | **grant-based, not ScopeKind-based** — GLOBAL roles bypass, everyone else needs an explicit `DocumentAccess` row (VIEW/DOWNLOAD/EDIT/SHARE); download additionally gated on `scanStatus === 'CLEAN'` | single record (no bare list — always reached via an owning record's evidence field) | **Partially implemented F04** — `lib/documents/api.ts`'s `getDocument`/`requestDocumentDownload` + `EvidenceDocumentLink` component (redeems the 2-step signed-URL flow — `GET /documents/:id/download` → `resolveApiUrl` → new-tab navigate to the returned `downloadUrl`, never treated as a permanent link) is the only F04 usage; every `evidenceDocumentId`/`documentId`/`signedDocumentId`/`receiptDocumentId` field across F04's forms is a manual UUID text input (no upload/browse UI — F07 owns the full Document subsystem, F04 instruction §31: "Không xây lại Document subsystem") |
-| Notifications | *(self-service, no permission resource)* | `recipientId === caller` always, any authenticated role | list | mark-read only, 404 if not the caller's own |
-| Reports | `reports` | `view` (every staff role, further role-narrowed inside the service for executive/manager); `export` ED/DM-only | aggregated, not paginated the same way (dashboard-shaped, not a list) | `cases/export` requires `reason` |
+| Documents | `documents` | **grant-based, not ScopeKind-based** — GLOBAL roles bypass, everyone else needs an explicit `DocumentAccess` row (VIEW/DOWNLOAD/EDIT/SHARE); download additionally gated on `scanStatus === 'CLEAN'` | single record (**no `GET /documents` list route exists on the backend at all** — confirmed against `DocumentsController`, see ASM-71; always reached via an owning record's evidence field or a known id) | **Implemented F07** — `/documents` (lookup+upload hub), `/documents/upload`, `/documents/[id]` (full metadata, edit, share, archive, create-version). `upload`/`createVersion` use `apiUpload` (multipart, F02 foundation); `share` is additive-only, no list-grants/revoke endpoint exists (ASM-72); version history walks backward only via `previousVersionId`, no `nextVersionId` (ASM-73). `EvidenceDocumentLink` (F04) now also links to `/documents/[id]` |
+| Notifications | *(self-service, no permission resource)* | `recipientId === caller` always, any authenticated role | list | **Implemented F07** — `/notifications` (F02's bell badge foundation, `useUnreadNotificationCount`, now links here); mark-read only, 404 if not the caller's own; no bulk "mark all read" endpoint exists — the inbox loops the single-item action over the current page's unread rows (ASM-75); event→navigation map transcribed from real `notify(...)` call sites, TASK_* events get no link since no Task detail route exists anywhere in this app (ASM-74) |
+| Reports | `reports` | `view` (every staff role, further role-narrowed inside the service for executive/manager); `export` ED/DM-only | aggregated, not paginated the same way (dashboard-shaped, not a list) | `cases/export` requires `reason`, fully **synchronous** (no job/status/async-download flow — ASM-76) |
 | Admin / Identity — Users | `users` | GLOBAL, SYSTEM_ADMIN (full) / EXECUTIVE_DIRECTOR (`view` only, no `suspend`/`offboard`) | list/detail | `suspend`/`reactivate`/`offboard` SYSTEM_ADMIN-only |
 | Admin / Identity — Audit logs | `audit_logs` | GLOBAL, EXECUTIVE_DIRECTOR/SYSTEM_ADMIN only | list | read-only, viewing it is itself audited |
 | Admin / Identity — Jobs | `jobs` | GLOBAL, SYSTEM_ADMIN only | list/detail | read-only (background job status observability) |
-| Portal (all sub-resources) | `portal` (class-level `access` gate) + the underlying domain resource's own scope, resolved OWN_STUDENT/revocation-aware | see `FRONTEND_ROUTES.md` PORTAL section | list/detail, narrower field set than the staff equivalent (e.g. Task's `blocker`/`qualityScore`/`ownerId` always stripped) | narrow, portal-specific action set only (submit evidence, submit task output/status, respond to nothing financial) — never the full staff mutation surface |
+| Portal (all sub-resources) | `portal` (class-level `access` gate) + the underlying domain resource's own scope, resolved OWN_STUDENT/revocation-aware | see `FRONTEND_ROUTES.md` PORTAL section | list/detail, narrower field set than the staff equivalent (e.g. Task's `blocker`/`qualityScore`/`ownerId` always stripped) | **Implemented F08** — narrow, portal-specific action set only (milestone/checklist evidence submit, task output/status, mark-notification-read reused from F07) — never the full staff mutation surface. `PortalService` delegates straight into the existing Phase 05-10 domain services (`ApplicationsService`/`VisasService`/`ContractsService`/... — confirmed by reading the live service), so every Portal type in `lib/portal/types.ts` reuses the SAME staff type (`Application`/`Visa`/`Enrollment`/`Contract`/`Payment`/`ScholarshipApplication`) rather than duplicating it |
 
 ## 3. What F01 does not map
 

@@ -12,7 +12,14 @@
 
   --border: #e5e7eb;
   --muted: #f5f5f5;
-  --muted-foreground: #6b7280;
+  /* F09 accessibility hardening (instruction §25) — gray-500 (#6b7280) on white measures
+     ~4.83:1, already past WCAG AA's 4.5:1 for normal text, but `text-muted-foreground` is
+     used for the vast majority of secondary/meta text app-wide (dates, ids, descriptions),
+     so a wider margin is worth the one-token change: gray-600 (#4b5563) measures ~7.56:1
+     (both ratios computed via the standard WCAG relative-luminance formula against #ffffff),
+     comfortably into AAA territory, with no visible page-by-page change needed since every
+     usage already goes through this one CSS variable. */
+  --muted-foreground: #4b5563;
 
   --primary: #1d4ed8;
   --primary-foreground: #ffffff;

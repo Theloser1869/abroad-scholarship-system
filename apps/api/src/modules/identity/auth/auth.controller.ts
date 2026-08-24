@@ -16,6 +16,20 @@ import { IssuedTokens, RequestMeta, SessionService } from './session.service';
 import { TokenService } from './token.service';
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
+/// F11A — was `/auth`. A cookie's `Path` is matched against the REQUEST-URI the browser
+/// actually addresses, before any reverse-proxy rewriting happens (the proxy is invisible to
+/// the cookie jar) — so once a same-origin frontend proxy fronts this API under a prefix
+/// (e.g. `/api/*`, `docs/frontend/FRONTEND_DEPLOYMENT_RUNBOOK.md` "Same-origin API proxy"),
+/// every browser-visible request path becomes `/api/auth/...`, which does not start with
+/// `/auth` — so a `Path=/auth` cookie is silently never sent back on `/api/auth/refresh`,
+/// breaking the entire refresh flow. Proved by a real end-to-end proxy test (login → cookie
+/// stored against the frontend origin with `Path=/auth` → refresh through the same proxy →
+/// 401, cookie never attached). Widened to `/` — the only value correct regardless of
+/// deployment topology (direct access, this proxy, or any future proxy prefix), since `/` is
+/// a prefix of every path. `httpOnly`/`secure`/`sameSite: 'strict'` are unaffected — `Path`
+/// only scopes which outgoing requests attach the cookie, not who can read it or which sites
+/// receive it; SameSite=Strict deliberately kept unchanged per this phase's own instruction.
+const REFRESH_COOKIE_PATH = '/';
 
 /// Reference implementation of 03-security/01_AUTH.md. Every mutating/sensitive route is
 /// `@Public()` where it must be reachable pre-login (login, refresh, password reset) and
@@ -74,7 +88,7 @@ export class AuthController {
     if (principal) {
       await this.auth.logout(principal.sessionId);
     }
-    res.clearCookie(REFRESH_COOKIE_NAME, { path: '/auth' });
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
     return { loggedOut: true };
   }
 
@@ -151,7 +165,7 @@ export class AuthController {
       httpOnly: true,
       secure,
       sameSite: 'strict',
-      path: '/auth',
+      path: REFRESH_COOKIE_PATH,
       maxAge: this.tokens.refreshTokenTtlDays() * 24 * 60 * 60 * 1000,
     });
   }

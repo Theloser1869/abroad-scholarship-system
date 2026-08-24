@@ -81,8 +81,43 @@ jobs:
       - name: Build production Docker image (artifact generation)
         run: docker build -t abroad-scholarship-api:${{ github.sha }} .
 
+  frontend:
+    # Phase F11 (frontend deployment readiness) — added alongside the pre-existing backend
+    # `test` job above, not merged into it: the two are fully independent (frontend needs no
+    # database/backend secrets at all — its tests run against a mocked API layer via Vitest/
+    # happy-dom, and `next build` only needs a syntactically valid NEXT_PUBLIC_API_URL, never
+    # a reachable one) and gain nothing from serializing.
+    runs-on: ubuntu-latest
+    env:
+      # CI-only placeholder — a real, syntactically valid HTTPS origin the build's own
+      # apps/web/next.config.ts validation requires, never an endpoint this job actually
+      # calls (no live backend runs in this job). Never a real deployment target.
+      NEXT_PUBLIC_API_URL: https://ci-placeholder.invalid
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (deterministic — lockfile only)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run web:typecheck
+
+      - name: Lint
+        run: npm run web:lint
+
+      - name: Tests
+        run: npm run web:test
+
+      - name: Build
+        run: npm run web:build
+
   deployment-gate:
-    needs: test
+    needs: [test, frontend]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:

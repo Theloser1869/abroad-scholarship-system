@@ -17,7 +17,7 @@ export function Sidebar() {
   return (
     <nav aria-label="Điều hướng chính" className="hidden w-56 shrink-0 border-r border-border p-4 text-sm md:block">
       {STAFF_NAV.map((group) => {
-        const visibleItems = group.items.filter((item) => can(item.resource, item.action));
+        const visibleItems = group.items.filter((item) => !item.resource || can(item.resource, item.action!));
         if (visibleItems.length === 0) return null;
         return (
           <div key={group.label} className="mb-4">

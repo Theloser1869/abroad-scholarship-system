@@ -212,6 +212,21 @@ describe('Admission — Offer + Scholarship Application (e2e)', () => {
       expect(res.body).not.toHaveProperty('universityName');
       expect(res.body).not.toHaveProperty('programName');
     });
+
+    /// DEC-11 — list/detail embed a ScholarshipMaster summary (id/code/provider/name/
+    /// coverage/amount) so a row can show "which scholarship" without a per-row N+1 fetch;
+    /// this is still a real FK-backed embed, not the copied program/university data the
+    /// test above forbids.
+    it('list and detail embed the ScholarshipMaster summary (DEC-11)', async () => {
+      const record = await prisma.scholarshipApplication.findUniqueOrThrow({ where: { id: scholarshipApplicationAId } });
+      const listRes = await request(app.getHttpServer()).get(`/cases/${record.caseId}/scholarship-applications`).set('Authorization', `Bearer ${directorToken}`);
+      expect(listRes.status).toBe(200);
+      const row = listRes.body.find((s: { id: string }) => s.id === scholarshipApplicationAId);
+      expect(row.scholarshipMaster).toEqual(expect.objectContaining({ id: scholarshipMasterAId, provider: expect.any(String), name: expect.any(String) }));
+
+      const detailRes = await request(app.getHttpServer()).get(`/scholarship-applications/${scholarshipApplicationAId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(detailRes.body.scholarshipMaster.id).toBe(scholarshipMasterAId);
+    });
   });
 
   describe('Scholarship Application — eligibility gate + workflow', () => {

@@ -1,11 +1,27 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { UniversityChoice } from '@prisma/client';
+import { Program, University, UniversityChoice } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ScopePolicyService } from '../../identity/rbac/scope-policy.service';
 import { CreateUniversityChoiceDto } from './dto/create-university-choice.dto';
 import { ReviewUniversityChoiceDto } from './dto/review-university-choice.dto';
 import { UpdateUniversityChoiceDto } from './dto/update-university-choice.dto';
+
+/// DEC-11 — mirrors DEC-09/DEC-10's `STUDENT_SUMMARY_SELECT` exactly. UniversityChoice
+/// list/detail is core F05 UX ("university/program relation") and only carried `programId`
+/// (a bare FK) before this.
+const PROGRAM_SUMMARY_SELECT = {
+  select: {
+    id: true,
+    degreeLevel: true,
+    major: true,
+    university: { select: { id: true, officialName: true, countryCode: true } },
+  },
+} as const;
+
+export type UniversityChoiceWithProgram = UniversityChoice & {
+  program: Pick<Program, 'id' | 'degreeLevel' | 'major'> & { university: Pick<University, 'id' | 'officialName' | 'countryCode'> };
+};
 
 /// 08-admission/01_MASTER_DATA.md School Selection. `caseId` is nullable (a choice may be
 /// proposed during early counseling before a Case formally exists — unlike Application,
@@ -20,12 +36,16 @@ export class UniversityChoicesService {
     private readonly scope: ScopePolicyService,
   ) {}
 
-  async listForStudent(principal: Principal, studentId: string): Promise<UniversityChoice[]> {
+  async listForStudent(principal: Principal, studentId: string): Promise<UniversityChoiceWithProgram[]> {
     await this.scope.assertStudentAccessible(principal, studentId);
-    return this.prisma.universityChoice.findMany({ where: { studentId }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.universityChoice.findMany({
+      where: { studentId },
+      orderBy: { createdAt: 'desc' },
+      include: { program: PROGRAM_SUMMARY_SELECT },
+    });
   }
 
-  async getById(principal: Principal, id: string): Promise<UniversityChoice> {
+  async getById(principal: Principal, id: string): Promise<UniversityChoiceWithProgram> {
     const choice = await this.findOrThrow(id);
     await this.assertAccessible(principal, choice);
     return choice;
@@ -86,8 +106,8 @@ export class UniversityChoicesService {
     }
   }
 
-  private async findOrThrow(id: string): Promise<UniversityChoice> {
-    const choice = await this.prisma.universityChoice.findUnique({ where: { id } });
+  private async findOrThrow(id: string): Promise<UniversityChoiceWithProgram> {
+    const choice = await this.prisma.universityChoice.findUnique({ where: { id }, include: { program: PROGRAM_SUMMARY_SELECT } });
     if (!choice) throw new NotFoundException({ code: 'UNIVERSITY_CHOICE_NOT_FOUND', message: `University choice ${id} not found.` });
     return choice;
   }

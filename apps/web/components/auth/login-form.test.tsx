@@ -1,13 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LoginForm } from "./login-form";
 import { ApiError } from "@/lib/api/types";
 
 const replaceMock = vi.fn();
+const searchParamsState = vi.hoisted(() => ({ next: null as string | null }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(searchParamsState.next ? { next: searchParamsState.next } : {}),
 }));
 
 const loginMock = vi.fn();
@@ -18,6 +19,10 @@ vi.mock("@/lib/auth/auth-context", () => ({
 }));
 
 describe("LoginForm", () => {
+  beforeEach(() => {
+    searchParamsState.next = null;
+  });
+
   it("submits username/password and redirects by role on success", async () => {
     loginMock.mockResolvedValue({ mfaRequired: false, principal: { userId: "u1", roleCode: "CONSULTANT", sessionId: "s1" } });
     render(<LoginForm />);
@@ -86,6 +91,66 @@ describe("LoginForm", () => {
     await userEvent.click(screen.getByRole("button", { name: "Xác thực" }));
 
     expect(mfaVerifyMock).toHaveBeenCalledWith("mfa-token-abc", "123456");
+    expect(replaceMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("F09: honors a safe internal ?next= path instead of the role default", async () => {
+    searchParamsState.next = "/cases/123";
+    loginMock.mockResolvedValue({ mfaRequired: false, principal: { userId: "u1", roleCode: "CONSULTANT", sessionId: "s1" } });
+    render(<LoginForm />);
+
+    await userEvent.type(screen.getByLabelText("Tên đăng nhập"), "admin");
+    await userEvent.type(screen.getByLabelText("Mật khẩu"), "secret123");
+    await userEvent.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
+    expect(replaceMock).toHaveBeenCalledWith("/cases/123");
+  });
+
+  it("F09 hardening: rejects a protocol-relative ?next=//evil.com (open-redirect shape), falling back to the role default", async () => {
+    searchParamsState.next = "//evil.com/phishing";
+    loginMock.mockResolvedValue({ mfaRequired: false, principal: { userId: "u1", roleCode: "CONSULTANT", sessionId: "s1" } });
+    render(<LoginForm />);
+
+    await userEvent.type(screen.getByLabelText("Tên đăng nhập"), "admin");
+    await userEvent.type(screen.getByLabelText("Mật khẩu"), "secret123");
+    await userEvent.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
+    expect(replaceMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("F09 hardening: rejects ?next=/login (would loop straight back to the login page), falling back to the role default", async () => {
+    searchParamsState.next = "/login";
+    loginMock.mockResolvedValue({ mfaRequired: false, principal: { userId: "u1", roleCode: "CONSULTANT", sessionId: "s1" } });
+    render(<LoginForm />);
+
+    await userEvent.type(screen.getByLabelText("Tên đăng nhập"), "admin");
+    await userEvent.type(screen.getByLabelText("Mật khẩu"), "secret123");
+    await userEvent.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
+    expect(replaceMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("F11A hardening: rejects ?next=/api/... (the same-origin API proxy path, never a real page), falling back to the role default", async () => {
+    searchParamsState.next = "/api/students";
+    loginMock.mockResolvedValue({ mfaRequired: false, principal: { userId: "u1", roleCode: "CONSULTANT", sessionId: "s1" } });
+    render(<LoginForm />);
+
+    await userEvent.type(screen.getByLabelText("Tên đăng nhập"), "admin");
+    await userEvent.type(screen.getByLabelText("Mật khẩu"), "secret123");
+    await userEvent.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
+    expect(replaceMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("F11A hardening: rejects a backslash-prefixed ?next=/\\evil.com (a known WHATWG-URL backslash-normalization bypass for a //-only check), falling back to the role default", async () => {
+    searchParamsState.next = "/\\evil.com/phishing";
+    loginMock.mockResolvedValue({ mfaRequired: false, principal: { userId: "u1", roleCode: "CONSULTANT", sessionId: "s1" } });
+    render(<LoginForm />);
+
+    await userEvent.type(screen.getByLabelText("Tên đăng nhập"), "admin");
+    await userEvent.type(screen.getByLabelText("Mật khẩu"), "secret123");
+    await userEvent.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
     expect(replaceMock).toHaveBeenCalledWith("/dashboard");
   });
 });

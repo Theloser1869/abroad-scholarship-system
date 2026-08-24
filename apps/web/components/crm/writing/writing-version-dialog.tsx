@@ -5,6 +5,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import type { CreateWritingVersionInput } from "@/lib/writing/types";
@@ -56,12 +57,11 @@ export function WritingVersionDialog({
           <label htmlFor="version-content" className="mb-1 block text-sm font-medium">
             Nội dung
           </label>
-          <textarea
+          <Textarea
             id="version-content"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={6}
-            className="w-full rounded border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
           />
         </div>
         <div>

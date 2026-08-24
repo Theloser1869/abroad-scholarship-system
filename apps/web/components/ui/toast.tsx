@@ -63,8 +63,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            role="status"
-            aria-live="polite"
+            // F09 accessibility hardening (instruction §24 "toast announcements"): an error
+            // toast needs the assertive announcement `role="alert"` gives (interrupts the
+            // screen reader immediately, same as native form-validation errors elsewhere in
+            // this app) — `role="status"`/`aria-live="polite"` waits for a pause, appropriate
+            // for success/info but too easy to miss for a failure the user needs to act on.
+            role={t.variant === "danger" ? "alert" : "status"}
+            aria-live={t.variant === "danger" ? "assertive" : "polite"}
             className={cn(
               "pointer-events-auto relative rounded border px-4 py-3 pr-8 text-sm shadow-md",
               VARIANT_CLASSES[t.variant ?? "default"],

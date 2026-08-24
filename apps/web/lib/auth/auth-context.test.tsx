@@ -131,4 +131,18 @@ describe("AuthProvider — logout()", () => {
     expect(authApiMock.logout).toHaveBeenCalledOnce();
     expect(pushMock).toHaveBeenCalledWith("/login");
   });
+
+  it("still clears auth state and redirects to /login when the network logout call fails (F10 fix — was previously an unhandled rejection that left the UI stuck)", async () => {
+    authApiMock.refreshSession.mockResolvedValue(true);
+    authApiMock.fetchMe.mockResolvedValue({ userId: "u1", roleCode: "CONSULTANT", sessionId: "s1" });
+    authApiMock.logout.mockRejectedValue(new TypeError("Failed to fetch"));
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("AUTHENTICATED"));
+
+    await userEvent.click(screen.getByText("logout"));
+
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("UNAUTHENTICATED"));
+    expect(screen.getByTestId("role").textContent).toBe("none");
+    expect(pushMock).toHaveBeenCalledWith("/login");
+  });
 });

@@ -12,3 +12,14 @@ export interface NotificationRecord {
   readAt: string | null;
   createdAt: string;
 }
+
+/// Mirrors `NotificationQueryDto` — `sort` comes from the shared `ListQueryDto` base
+/// (`createdAt`/`sentAt`, matching `SORTABLE_FIELDS` in `notifications.service.ts`).
+export interface NotificationListParams {
+  page?: number;
+  limit?: number;
+  channel?: NotificationChannel;
+  unreadOnly?: boolean;
+  sort?: string;
+  [key: string]: string | number | boolean | undefined;
+}

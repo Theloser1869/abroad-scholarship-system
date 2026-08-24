@@ -5,6 +5,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import type { AssessmentCriterion, UpsertCriterionInput } from "@/lib/assessments/types";
@@ -104,12 +105,11 @@ export function CriterionDialog({
           <label htmlFor="criterion-recommendation" className="mb-1 block text-sm font-medium">
             Khuyến nghị
           </label>
-          <textarea
+          <Textarea
             id="criterion-recommendation"
             value={recommendation}
             onChange={(e) => setRecommendation(e.target.value)}
             rows={3}
-            className="w-full rounded border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
           />
         </div>
         <div>

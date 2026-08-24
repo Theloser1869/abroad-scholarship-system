@@ -148,6 +148,19 @@ describe('Admission Master Data (e2e)', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.some((p: { id: string }) => p.id === programAId)).toBe(true);
     });
+
+    /// DEC-11 — list/detail embed a University summary so a Program row can show which
+    /// university it belongs to without a per-row N+1 fetch (mirrors DEC-09/DEC-10).
+    it('list and detail embed the University summary (DEC-11)', async () => {
+      const listRes = await request(app.getHttpServer()).get('/programs').query({ universityId: universityAId, limit: 50 }).set('Authorization', `Bearer ${consultantAToken}`);
+      expect(listRes.status).toBe(200);
+      const row = listRes.body.data.find((p: { id: string }) => p.id === programAId);
+      expect(row.university).toEqual({ id: universityAId, officialName: expect.any(String), countryCode: expect.any(String) });
+
+      const detailRes = await request(app.getHttpServer()).get(`/programs/${programAId}`).set('Authorization', `Bearer ${consultantAToken}`);
+      expect(detailRes.status).toBe(200);
+      expect(detailRes.body.university).toEqual({ id: universityAId, officialName: expect.any(String), countryCode: expect.any(String) });
+    });
   });
 
   describe('ScholarshipMaster — separate from ScholarshipApplication, duplicate detection', () => {

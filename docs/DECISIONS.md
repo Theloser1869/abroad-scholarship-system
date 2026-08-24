@@ -395,3 +395,141 @@ migration, no schema change, no existing endpoint's URL/method/permission change
 `GET /contracts`/`GET /contracts/:id` both embed `{id, studentCode, fullName}` and never a
 `budget` field. Full unit/e2e suite re-run recorded in `docs/frontend/phase-status/
 PHASE_F04.md`.
+
+## DEC-11 — Minimal backend fix: `Program`/`Application`/`UniversityChoice`/`ScholarshipApplication` list+detail now include a display-safe parent-entity summary (Phase F05)
+
+**ID**: DEC-11
+**Context**: Building the F05 Admission frontend surfaced the same gap DEC-09/DEC-10 already
+fixed twice, now in four places at once: `ProgramsService.list()`/`getById()` returned a bare
+`universityId` with no University relation; `ApplicationsService.listForCase()`/`getById()`
+returned a bare `programId`; `UniversityChoicesService.listForStudent()`/`getById()` returned a
+bare `programId`; `ScholarshipApplicationsService.listForCase()`/`getById()` returned a bare
+`scholarshipMasterId`. F05's own instructions (§9/§13/§12/§33) explicitly require these list/
+detail views to show "university, program name" / "which scholarship" per row — without an
+embed, every row would need its own N+1 fetch, or the frontend would need to pre-fetch and
+join the entire University/Program/ScholarshipMaster catalog client-side, both forbidden by
+the same "no client-side full-table join" rule DEC-09 established.
+**Options**: identical menu to DEC-09/DEC-10 — (1) frontend-side full-catalog join, forbidden;
+(2) a new dedicated summary endpoint per relation, duplicating each service's existing scope-
+filtering logic four times over; (3) minimally extend the four existing services' `list()`/
+`getById()` Prisma queries with a `select`-scoped relation.
+**Decision**: Option 3, exactly mirroring DEC-09/DEC-10's precedent, applied four times:
+- `programs.service.ts`: new `UNIVERSITY_SUMMARY_SELECT` (`{ id, officialName, countryCode }`)
+  + `ProgramWithUniversity` type, added to `list()`/`getById()` (via `findOrThrow`).
+- `applications.service.ts`: new `PROGRAM_SUMMARY_SELECT` (`{ id, degreeLevel, major,
+  university: { id, officialName, countryCode } }` — a nested two-hop select, since Application
+  → Program → University) + `ApplicationWithProgram` type, added to `listForCase()`/`getById()`
+  (the latter already had an `include` for `checklist`/`offers`/`scholarshipApplications`;
+  `program` was added alongside, not a separate query).
+- `university-choices.service.ts`: the identical `PROGRAM_SUMMARY_SELECT` shape (declared
+  locally, not imported cross-module — matching the project's existing per-service local-const
+  convention for `STUDENT_SUMMARY_SELECT`) + `UniversityChoiceWithProgram` type, added to
+  `listForStudent()`/`getById()` (via `findOrThrow`).
+- `scholarship-applications.service.ts`: new `SCHOLARSHIP_MASTER_SUMMARY_SELECT` (`{ id,
+  scholarshipCode, provider, name, coverageType, amount, percentage, amountCurrency }`) +
+  `ScholarshipApplicationWithMaster` type, added to `listForCase()`/`getById()` (via
+  `findOrThrow`).
+**Reason**: same as DEC-09/DEC-10 — a genuine "API bug thật cần sửa để Admission frontend hoạt
+động," not a convenience shortcut; every fix is additive (a new nested field on already-existing
+endpoints' responses), changes no existing endpoint's URL/method/permission/status code, and
+does not duplicate scope-filtering logic the way four new endpoints would.
+**Reason (type safety)**: `FieldPolicyService.redactScholarshipApplication` is called on every
+ScholarshipApplication response (defense-in-depth `internalNotes` redaction for
+STUDENT_PARENT, unrelated to this fix). Its signature was non-generic, so passing the new
+`ScholarshipApplicationWithMaster` type through it would have silently widened the return type
+back down to plain `ScholarshipApplication`, dropping `.scholarshipMaster` from what the
+frontend sees typed even though the response body still contained it. Made the method generic
+(`redactScholarshipApplication<T extends ScholarshipApplication>(...): Omit<T, 'internalNotes'>
+& Pick<RedactedScholarshipApplication, 'internalNotes'>`), identical fix shape to DEC-10's
+`redactContract` — the redaction logic itself is unchanged, still only ever nulls
+`internalNotes` for the same `SCHOLARSHIP_APPLICATION_REDACTED_FOR` role set. University/
+Program/UniversityChoice/Application have no `redact*` method at all (confirmed directly
+against `field-policy.service.ts` — none of these four entities has ever had field-level
+redaction), so no equivalent generic-signature fix was needed for the other three services.
+**Impact**: the four services' `list()`/`getById()` (and, for Program/UniversityChoice, the
+shared private `findOrThrow()` both call) return the `*With*` types instead of the bare Prisma
+model; every other method on each service (create/update/verify for Program; create/update/
+submit/updateStatus/transitionToOffer for Application; create/update/review for
+UniversityChoice; create/update/confirmEligibility/updateStatus/award/reject for
+ScholarshipApplication) is untouched and still returns the plain model, matching DEC-09/DEC-10's
+own asymmetric precedent of only widening the read paths, not every mutation response. No
+migration, no schema change, no existing endpoint's URL/method/permission changed. Regression:
+`api:typecheck` PASS (0 errors), `api:lint` PASS (0 new warnings, same 7 pre-existing baseline),
+plus 3 new e2e assertions (`admission-master-data.e2e-spec.ts` for Program→University,
+`admission-application.e2e-spec.ts` for UniversityChoice→Program and Application→Program, and
+`admission-offer-scholarship.e2e-spec.ts` for ScholarshipApplication→ScholarshipMaster) each
+asserting the real embed shape on both list and detail. Full unit/e2e suite re-run recorded in
+`docs/frontend/phase-status/PHASE_F05.md`.
+
+## DEC-12 — Minimal backend fix: `Enrollment`/`PartnerProgram`/`PartnerStudentLink`/`CommissionTransaction` list+detail now include display-safe parent-entity summaries (Phase F06)
+
+**ID**: DEC-12
+**Context**: Building the F06 Visa/Partner frontend surfaced the same gap DEC-09/10/11 already
+fixed six times over, now in four places at once: `EnrollmentsService.listForCase()`/
+`getById()` returned bare `universityId`/`programId` with no relations; `PartnerProgramsService
+.listForPartner()`/`getById()` returned a bare `partnerId` and an optional bare `programId`;
+`PartnerStudentLinksService`'s shared private `paginate()` helper (used by both
+`listForPartner()` and `listForStudent()`) plus `getById()`/`findOrThrow()` returned bare
+`partnerId`/`studentId`; `CommissionTransactionsService.list()` (covering both the bare global
+list and the partner-nested list) plus `getById()`/`findOrThrow()` returned a bare `partnerId`
+and nullable `studentId`. F06's own instructions require these list/detail views to show which
+University/Program an Enrollment targets, which Partner/Program a PartnerProgram belongs to,
+which Partner/Student a PartnerStudentLink connects, and which Partner/Student a
+CommissionTransaction is attributed to — without an embed, every row would need its own N+1
+fetch or a forbidden full-catalog client-side join, the same rule DEC-09 established.
+**Options**: identical menu to DEC-09/10/11 — (1) frontend-side full-catalog join, forbidden;
+(2) a new dedicated summary endpoint per relation, duplicating each service's existing scope-
+filtering logic four times over; (3) minimally extend the four existing services' list/detail
+Prisma queries with a `select`-scoped relation.
+**Decision**: Option 3, exactly mirroring DEC-09/10/11's precedent, applied four times at once —
+the largest single-phase instance of this fix so far:
+- `enrollments.service.ts`: new `UNIVERSITY_SUMMARY_SELECT` (`{ id, officialName, countryCode }`)
+  + `PROGRAM_SUMMARY_SELECT` (`{ id, degreeLevel, major }`) + `EnrollmentWithRelations` type,
+  added to `listForCase()`/`getById()`/`findOrThrow()`.
+- `partner-programs.service.ts`: new `PARTNER_SUMMARY_SELECT` (`{ id, name, countryCode }`) +
+  `PROGRAM_SUMMARY_SELECT` (nested one hop further into University, since PartnerProgram →
+  Program → University) + `PartnerProgramWithRelations` type, added to `listForPartner()`/
+  `getById()`/`findOrThrow()`.
+- `partner-student-links.service.ts`: new `PARTNER_SUMMARY_SELECT` + `STUDENT_SUMMARY_SELECT`
+  (`{ id, studentCode, fullName }`) + `PartnerStudentLinkWithRelations` type, added to the
+  shared private `paginate()` helper (so both `listForPartner()` and `listForStudent()` — two
+  independent list contexts reaching the same underlying rows — pick it up from one place) plus
+  `findOrThrow()`.
+- `commission-transactions.service.ts`: the identical `PARTNER_SUMMARY_SELECT` shape (declared
+  locally, matching the project's per-service local-const convention) + a nullable-safe
+  `STUDENT_SUMMARY_SELECT` + `CommissionTransactionWithRelations` type, added to `list()`
+  (covers both the bare global list and the partner-nested list) plus `getById()`/
+  `findOrThrow()`.
+**Reason**: same as DEC-09/10/11 — a genuine "API bug thật cần sửa để Visa/Partner frontend hoạt
+động," not a convenience shortcut; every fix is additive (a new nested field on already-existing
+endpoints' responses), changes no existing endpoint's URL/method/permission/status code, and
+does not duplicate scope-filtering logic the way four new endpoints would.
+**Reason (type safety)**: `FieldPolicyService.redactEnrollment` is called on every Enrollment
+response (defense-in-depth `internalNotes` redaction for STUDENT_PARENT, unrelated to this fix).
+Its signature was non-generic, so passing the new `EnrollmentWithRelations` type through it
+would have silently widened the return type back down to plain `Enrollment`, dropping
+`.university`/`.program` from what the frontend sees typed even though the response body still
+contained them. Made the method generic (`redactEnrollment<T extends Enrollment>(...):
+Omit<T, 'internalNotes'> & Pick<RedactedEnrollment, 'internalNotes'>`), identical fix shape to
+DEC-10's `redactContract`/DEC-11's `redactScholarshipApplication` — the redaction logic itself
+is unchanged, still only ever nulls `internalNotes` for the same role set. PartnerProgram/
+PartnerStudentLink/CommissionTransaction have no `redact*` method at all (confirmed directly
+against `field-policy.service.ts` — none of these three entities has ever had field-level
+redaction), so no equivalent generic-signature fix was needed for the other three services.
+**Impact**: the four services' list/detail paths (and, for Enrollment/PartnerProgram/
+PartnerStudentLink, the shared private helpers they route through) return the `*With*`/
+`*WithRelations` types instead of the bare Prisma model; every mutation method on each service
+(create/update/confirm/withdraw for Enrollment; create/update for PartnerProgram; create/
+update/archive for PartnerStudentLink; create/update-linkage/confirm-eligibility/calculate/
+approve/mark-payable/pay/cancel for CommissionTransaction) is untouched and still returns the
+plain model, matching DEC-09/10/11's own asymmetric precedent of only widening the read paths,
+not every mutation response. No migration, no schema change, no existing endpoint's URL/method/
+permission changed. Regression: `api:typecheck` PASS (0 errors), `api:lint` PASS (0 new
+warnings, same 7 pre-existing baseline), plus 4 new e2e assertions
+(`pre-departure-enrollment-closure.e2e-spec.ts` for Enrollment→University/Program,
+`partners.e2e-spec.ts` for PartnerProgram→Partner/Program, PartnerStudentLink→Partner/Student in
+both list contexts, and CommissionTransaction→Partner/Student in both list contexts) each
+asserting the real embed shape on list and detail, run targeted (`pre-departure-enrollment-
+closure`, `partners`, `visa` suites, 84/84 passed) before the full regression re-run — 25 suites,
+**488/488 tests passed** (484 baseline + 4 new DEC-12 assertions), recorded in
+`docs/frontend/phase-status/PHASE_F06.md`.

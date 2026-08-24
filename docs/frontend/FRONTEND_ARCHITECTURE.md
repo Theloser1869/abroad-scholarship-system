@@ -218,3 +218,31 @@ vs. something else), CI wiring, and any `render.yaml`/CI changes are explicitly 
 (Deployment Readiness) scope**, not decided or touched here — `apps/web` currently has no
 Dockerfile, no `render.yaml` entry, and is not referenced by the existing backend
 `Dockerfile`/`render.yaml` in any way (verified: neither file mentions `apps/web`).
+
+**F11 resolution**: no hosting platform has actually been chosen yet (deploying is out of
+F11's own scope) — **Vercel** is F11's *recommended*, not decided, target (unmodified stock
+Next.js App Router, zero platform-specific config needed beyond env vars; see
+`docs/frontend/FRONTEND_DEPLOYMENT_RUNBOOK.md` "Deployment target" for the full reasoning and
+the documented Cloudflare Pages alternative). `apps/web/next.config.ts` gained F11 additions
+that are platform-neutral by construction — standard `headers()`/build-time env validation,
+no `vercel.json`/`wrangler.toml`/other platform file added, consistent with this section's
+existing "no Dockerfile, no render.yaml entry" posture. A genuine, previously-undiscovered
+cross-origin auth-cookie incompatibility was found during this review — see
+`docs/frontend/FRONTEND_AUTH.md` §13 and `docs/frontend/FRONTEND_DEPLOYMENT_RUNBOOK.md`
+"Critical finding" — unresolved as of F11 since resolving it properly depends on which
+platform is eventually chosen.
+
+**F11A resolution**: the recommended fix WAS implemented — `apps/web/next.config.ts` gained an
+`async rewrites()` export proxying `/api/:path*` to a server-only `API_PROXY_TARGET` (never
+`NEXT_PUBLIC_*`), active only when that variable is set (local dev, which never sets it,
+continues calling the backend directly and completely unaffected — this remains "platform-
+neutral by construction," now also "topology-neutral": local-direct and same-origin-proxied
+are both first-class, switched purely by which env vars are set, no code branch on `NODE_ENV`
+or a specific host). `NEXT_PUBLIC_API_URL` is now legitimately either an absolute origin
+(local dev) or the relative path `/api` (proxied) — `lib/api/client.ts`'s `buildUrl` was
+changed from `new URL(...)` (which throws on a bare relative string) to plain string
+concatenation, since `fetch()`/`window.open()` both already accept a relative URL directly.
+Implementing this surfaced one further, genuine cookie-`Path` incompatibility, fixed with a
+minimal backend change — see `docs/frontend/FRONTEND_AUTH.md` §14 and
+`docs/frontend/phase-status/PHASE_F11A.md` for the full verification record (real `curl`
+round-trips and a real browser session, not just re-reading the code).

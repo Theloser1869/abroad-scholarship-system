@@ -15,6 +15,10 @@ import {
 /// retry (see §"401 handling" below). Domain-specific typed calls are NOT implemented here
 /// (per F01/F02 scope — `apiFetch` is the generic primitive every domain phase builds on).
 
+/// F11A same-origin proxy: `NEXT_PUBLIC_API_URL` is now legitimately either an absolute
+/// origin (local dev, `http://localhost:3000`) OR a same-origin relative path (production/
+/// demo, `/api` — proxied to the real backend by `next.config.ts`'s `rewrites()`). Both must
+/// work identically here.
 function apiBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_API_URL;
   if (!url) {
@@ -46,16 +50,24 @@ export interface ApiFetchOptions extends Omit<RequestInit, "body"> {
   _isRetry?: boolean;
 }
 
+/// Deliberately NOT `new URL(...)` — the `URL` constructor requires an absolute first
+/// argument (or a second `base` argument) and throws on a bare relative string like `/api`,
+/// which is exactly the value `apiBaseUrl()` legitimately returns for the F11A same-origin
+/// proxy config. Plain string concatenation + `URLSearchParams` for the query string works
+/// identically whether the base is absolute (`http://localhost:3000`) or relative (`/api`) —
+/// `fetch()` itself accepts either form directly, resolving a relative URL against the
+/// current page's own origin exactly like a normal `<a href>` would.
 function buildUrl(path: string, query?: ApiFetchOptions["query"]): string {
-  const url = new URL(`${apiBaseUrl()}${path}`);
-  if (query) {
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== null) {
-        url.searchParams.set(key, String(value));
-      }
+  const base = `${apiBaseUrl()}${path}`;
+  if (!query) return base;
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null) {
+      search.set(key, String(value));
     }
   }
-  return url.toString();
+  const qs = search.toString();
+  return qs ? `${base}?${qs}` : base;
 }
 
 async function parseErrorBody(response: Response): Promise<ApiErrorBody | null> {

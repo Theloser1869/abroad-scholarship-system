@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/lib/test-utils/render-with-providers";
 import { RequirePermission } from "@/components/shell/require-permission";
 import { StudentDetailContent } from "./page";
@@ -26,6 +27,8 @@ const studentsApi = vi.hoisted(() => ({
   createStudentContact: vi.fn(),
   listCasesForStudent: vi.fn(),
   createCaseForStudent: vi.fn(),
+  inviteParent: vi.fn(),
+  revokeParentAccess: vi.fn(),
 }));
 vi.mock("@/lib/students/api", () => studentsApi);
 
@@ -102,5 +105,61 @@ describe("StudentDetailPage (360 view)", () => {
     await screen.findByText("Phạm Văn C");
     expect(screen.queryByRole("button", { name: "Lưu trữ" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sửa" })).toBeInTheDocument();
+  });
+
+  it("F08: invites a NONE-status contact into the Portal and shows the dev acceptance link", async () => {
+    authState.principal = { userId: "u1", roleCode: "CONSULTANT" };
+    studentsApi.getStudent.mockResolvedValue(makeStudent());
+    studentsApi.getStudentTimeline.mockResolvedValue([]);
+    studentsApi.listStudentContacts.mockResolvedValue([
+      { id: "c1", studentId: "student-1", type: "MOTHER", name: "Mẹ", relationship: "Mẹ", phone: null, email: "me@example.com", portalUserId: null, portalStatus: "NONE", revokedAt: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    studentsApi.listCasesForStudent.mockResolvedValue({ data: [], meta: { page: 1, limit: 50, totalItems: 0, totalPages: 0 } });
+    studentsApi.inviteParent.mockResolvedValue({ devToken: "abc123" });
+    const user = userEvent.setup();
+
+    renderDetail();
+    await user.click(await screen.findByRole("button", { name: "Mời vào cổng thông tin" }));
+
+    await waitFor(() => expect(studentsApi.inviteParent).toHaveBeenCalledWith("student-1", "c1"));
+  });
+
+  it("F08: revokes an ACTIVE contact's Portal access after confirmation", async () => {
+    authState.principal = { userId: "u1", roleCode: "CONSULTANT" };
+    studentsApi.getStudent.mockResolvedValue(makeStudent());
+    studentsApi.getStudentTimeline.mockResolvedValue([]);
+    studentsApi.listStudentContacts.mockResolvedValue([
+      { id: "c1", studentId: "student-1", type: "MOTHER", name: "Mẹ", relationship: "Mẹ", phone: null, email: "me@example.com", portalUserId: "u9", portalStatus: "ACTIVE", revokedAt: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    studentsApi.listCasesForStudent.mockResolvedValue({ data: [], meta: { page: 1, limit: 50, totalItems: 0, totalPages: 0 } });
+    studentsApi.revokeParentAccess.mockResolvedValue({ portalStatus: "REVOKED" });
+    const user = userEvent.setup();
+
+    renderDetail();
+    await user.click(await screen.findByRole("button", { name: "Thu hồi quyền truy cập" }));
+    // F09 hardening — confirmed through the shared ConfirmDialog, not window.confirm; its
+    // own confirm button label ("Thu hồi") is distinct from the trigger's, no ambiguity.
+    expect(studentsApi.revokeParentAccess).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("button", { name: "Thu hồi" }));
+
+    await waitFor(() => expect(studentsApi.revokeParentAccess).toHaveBeenCalledWith("student-1", "c1"));
+  });
+
+  it("F09: archives the student via the shared ConfirmDialog after confirmation", async () => {
+    authState.principal = { userId: "u1", roleCode: "EXECUTIVE_DIRECTOR" };
+    studentsApi.getStudent.mockResolvedValue(makeStudent());
+    studentsApi.getStudentTimeline.mockResolvedValue([]);
+    studentsApi.listStudentContacts.mockResolvedValue([]);
+    studentsApi.listCasesForStudent.mockResolvedValue({ data: [], meta: { page: 1, limit: 50, totalItems: 0, totalPages: 0 } });
+    studentsApi.archiveStudent.mockResolvedValue(makeStudent({ archivedAt: "2026-02-01T00:00:00.000Z" }));
+    const user = userEvent.setup();
+
+    renderDetail();
+    await user.click(await screen.findByRole("button", { name: "Lưu trữ" }));
+    expect(studentsApi.archiveStudent).not.toHaveBeenCalled();
+    // Trigger button + the dialog's own confirm button share the label — the dialog's is second.
+    await user.click(screen.getAllByRole("button", { name: "Lưu trữ" })[1]);
+
+    await waitFor(() => expect(studentsApi.archiveStudent).toHaveBeenCalled());
   });
 });

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 
@@ -56,14 +57,13 @@ export function CaseCloseDialog({
           <label htmlFor="closure-reason" className="mb-1 block text-sm font-medium">
             Lý do đóng case *
           </label>
-          <textarea
+          <Textarea
             id="closure-reason"
             required
             minLength={3}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={3}
-            className="w-full rounded border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
           />
         </div>
         {error ? (

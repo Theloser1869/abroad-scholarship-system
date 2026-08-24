@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { PartnerProgram, Prisma } from '@prisma/client';
+import { Partner, PartnerProgram, Prisma, Program, University } from '@prisma/client';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult, parseSort } from '../../../common/dto/list-query.dto';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
@@ -8,6 +8,21 @@ import { PartnerProgramQueryDto } from './dto/partner-program-query.dto';
 import { UpdatePartnerProgramDto } from './dto/update-partner-program.dto';
 
 const SORTABLE_FIELDS = ['name', 'degreeLevel', 'createdAt'] as const;
+
+/// DEC-12 — mirrors DEC-09/DEC-10/DEC-11's `STUDENT_SUMMARY_SELECT` pattern exactly.
+/// PartnerProgram list/detail is core F06 UX ("Hiển thị: partner, university/program
+/// relation") and only carried `partnerId`/`programId` (bare FKs) before this;
+/// `/partner-programs/:id` is a standalone route with no partner context in the URL at
+/// all, making the Partner embed especially necessary here.
+const PARTNER_SUMMARY_SELECT = { select: { id: true, name: true, countryCode: true } } as const;
+const PROGRAM_SUMMARY_SELECT = {
+  select: { id: true, degreeLevel: true, major: true, university: { select: { id: true, officialName: true, countryCode: true } } },
+} as const;
+
+export type PartnerProgramWithRelations = PartnerProgram & {
+  partner: Pick<Partner, 'id' | 'name' | 'countryCode'>;
+  program: (Pick<Program, 'id' | 'degreeLevel' | 'major'> & { university: Pick<University, 'id' | 'officialName' | 'countryCode'> }) | null;
+};
 
 /// 10-partners/01_PARTNER_CRM.md PartnerProgram section. "PartnerProgram phải thuộc
 /// Partner" — always created under an existing Partner, never standalone. "Không duplicate
@@ -20,7 +35,7 @@ export class PartnerProgramsService {
     private readonly idGenerator: IdGeneratorService,
   ) {}
 
-  async listForPartner(partnerId: string, query: PartnerProgramQueryDto): Promise<PaginatedResult<PartnerProgram>> {
+  async listForPartner(partnerId: string, query: PartnerProgramQueryDto): Promise<PaginatedResult<PartnerProgramWithRelations>> {
     await this.assertPartnerExists(partnerId);
     const { field, direction } = parseSort(query.sort, SORTABLE_FIELDS, { field: 'name', direction: 'asc' });
     const page = query.page ?? 1;
@@ -34,13 +49,19 @@ export class PartnerProgramsService {
     };
 
     const [data, totalItems] = await this.prisma.$transaction([
-      this.prisma.partnerProgram.findMany({ where, orderBy: { [field]: direction }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.partnerProgram.findMany({
+        where,
+        orderBy: { [field]: direction },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { partner: PARTNER_SUMMARY_SELECT, program: PROGRAM_SUMMARY_SELECT },
+      }),
       this.prisma.partnerProgram.count({ where }),
     ]);
-    return new PaginatedResult(data, new PageMeta(page, limit, totalItems));
+    return new PaginatedResult(data as PartnerProgramWithRelations[], new PageMeta(page, limit, totalItems));
   }
 
-  async getById(id: string): Promise<PartnerProgram> {
+  async getById(id: string): Promise<PartnerProgramWithRelations> {
     return this.findOrThrow(id);
   }
 
@@ -117,8 +138,11 @@ export class PartnerProgramsService {
     return partner;
   }
 
-  private async findOrThrow(id: string): Promise<PartnerProgram> {
-    const program = await this.prisma.partnerProgram.findUnique({ where: { id } });
+  private async findOrThrow(id: string): Promise<PartnerProgramWithRelations> {
+    const program = await this.prisma.partnerProgram.findUnique({
+      where: { id },
+      include: { partner: PARTNER_SUMMARY_SELECT, program: PROGRAM_SUMMARY_SELECT },
+    });
     if (!program) throw new NotFoundException({ code: 'PARTNER_PROGRAM_NOT_FOUND', message: `Partner program ${id} not found.` });
     return program;
   }

@@ -155,6 +155,25 @@ describe('Pre-Departure + Enrollment + Closure (e2e)', () => {
       expect(res.body.status).toBe('PLANNED');
     });
 
+    /// DEC-12 — list/detail embed a University + Program summary so an enrollment row can
+    /// show "institution, program" without a per-row N+1 fetch (mirrors DEC-09/10/11).
+    it('list and detail embed the University/Program summary (DEC-12)', async () => {
+      const { caseId } = await createCaseForConsultant();
+      const { offerId } = await createAcceptedOffer(caseId);
+      const created = await request(app.getHttpServer()).post(`/cases/${caseId}/enrollments`).set('Authorization', `Bearer ${consultantAToken}`).send({ offerId });
+      expect(created.status).toBe(201);
+
+      const listRes = await request(app.getHttpServer()).get(`/cases/${caseId}/enrollments`).set('Authorization', `Bearer ${consultantAToken}`);
+      expect(listRes.status).toBe(200);
+      const row = listRes.body.find((e: { id: string }) => e.id === created.body.id);
+      expect(row.university).toEqual({ id: expect.any(String), officialName: expect.any(String), countryCode: expect.any(String) });
+      expect(row.program).toEqual({ id: programAId, degreeLevel: expect.any(String), major: expect.any(String) });
+
+      const detailRes = await request(app.getHttpServer()).get(`/enrollments/${created.body.id}`).set('Authorization', `Bearer ${consultantAToken}`);
+      expect(detailRes.body.university.officialName).toEqual(expect.any(String));
+      expect(detailRes.body.program.id).toBe(programAId);
+    });
+
     it('confirming enforces at-most-one-CONFIRMED-per-case', async () => {
       const { caseId } = await createCaseForConsultant();
       const { offerId: offerId1 } = await createAcceptedOffer(caseId);

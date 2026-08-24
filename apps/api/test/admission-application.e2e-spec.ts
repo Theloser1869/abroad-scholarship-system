@@ -153,6 +153,24 @@ describe('Admission — University Choice + Application (e2e)', () => {
       expect(res.body.reviewedAt).not.toBeNull();
       expect(res.body.tier).toBe('MATCH');
     });
+
+    /// DEC-11 — list/detail embed a Program (+ nested University) summary so a choice row
+    /// can show "which university/program" without a per-row N+1 fetch.
+    it('list and detail embed the Program/University summary (DEC-11)', async () => {
+      const programId = await createProgram();
+      const { studentId } = await createCaseForConsultant();
+      const created = await request(app.getHttpServer()).post(`/students/${studentId}/university-choices`).set('Authorization', `Bearer ${consultantAToken}`).send({ programId, tier: 'MATCH' });
+      expect(created.status).toBe(201);
+
+      const listRes = await request(app.getHttpServer()).get(`/students/${studentId}/university-choices`).set('Authorization', `Bearer ${consultantAToken}`);
+      const row = listRes.body.find((c: { id: string }) => c.id === created.body.id);
+      expect(row.program).toMatchObject({ id: programId });
+      expect(row.program.university).toEqual({ id: expect.any(String), officialName: expect.any(String), countryCode: expect.any(String) });
+
+      const detailRes = await request(app.getHttpServer()).get(`/university-choices/${created.body.id}`).set('Authorization', `Bearer ${consultantAToken}`);
+      expect(detailRes.body.program).toMatchObject({ id: programId });
+      expect(detailRes.body.program.university.officialName).toEqual(expect.any(String));
+    });
   });
 
   describe('Application — RBAC / cross-case', () => {
@@ -183,6 +201,22 @@ describe('Admission — University Choice + Application (e2e)', () => {
       const res = await request(app.getHttpServer()).get(`/applications/${applicationAId}`).set('Authorization', `Bearer ${directorToken}`);
       expect(res.body.studentId).toBe(studentAId);
       expect(res.body.caseId).toBe(caseAId);
+    });
+
+    /// DEC-11 — list/detail embed a Program (+ nested University) summary so an application
+    /// row can show "university, program" without a per-row N+1 fetch.
+    it('list and detail embed the Program/University summary (DEC-11)', async () => {
+      // limit:100 — this shared dev DB accumulates Applications on caseAId across repeated
+      // e2e runs (other `it` blocks above create more via `createCaseForConsultant`-adjacent
+      // fixtures), so the default page size can push the seeded fixture off page 1.
+      const listRes = await request(app.getHttpServer()).get(`/cases/${caseAId}/applications`).query({ limit: 100 }).set('Authorization', `Bearer ${directorToken}`);
+      expect(listRes.status).toBe(200);
+      const row = listRes.body.data.find((a: { id: string }) => a.id === applicationAId);
+      expect(row.program).toEqual(expect.objectContaining({ id: expect.any(String), degreeLevel: expect.any(String), major: expect.any(String) }));
+      expect(row.program.university).toEqual({ id: expect.any(String), officialName: expect.any(String), countryCode: expect.any(String) });
+
+      const detailRes = await request(app.getHttpServer()).get(`/applications/${applicationAId}`).set('Authorization', `Bearer ${directorToken}`);
+      expect(detailRes.body.program.university.officialName).toEqual(expect.any(String));
     });
   });
 

@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Application, ApplicationStatus, Prisma } from '@prisma/client';
+import { Application, ApplicationStatus, Prisma, Program, University } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult, parseSort } from '../../../common/dto/list-query.dto';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
@@ -16,6 +16,22 @@ import { UpdateApplicationStatusDto } from './dto/update-application-status.dto'
 
 const SORTABLE_FIELDS = ['createdAt', 'deadline', 'status'] as const;
 const TERMINAL_STATUSES: ApplicationStatus[] = ['REJECT', 'WITHDRAWN'];
+
+/// DEC-11 — mirrors DEC-09/DEC-10's `STUDENT_SUMMARY_SELECT` exactly. Application list/
+/// detail is core F05 UX ("Hiển thị: university, program...") and only carried `programId`
+/// (a bare FK) before this.
+const PROGRAM_SUMMARY_SELECT = {
+  select: {
+    id: true,
+    degreeLevel: true,
+    major: true,
+    university: { select: { id: true, officialName: true, countryCode: true } },
+  },
+} as const;
+
+export type ApplicationWithProgram = Application & {
+  program: Pick<Program, 'id' | 'degreeLevel' | 'major'> & { university: Pick<University, 'id' | 'officialName' | 'countryCode'> };
+};
 
 /// 08-admission/02_APPLICATION.md. Workflow: Planning→Preparing→Ready for Review→
 /// Submitted→{Offer,Waitlist,Reject}→Withdrawn (any open state), server-side FSM, never a
@@ -44,7 +60,7 @@ export class ApplicationsService {
     private readonly idGenerator: IdGeneratorService,
   ) {}
 
-  async listForCase(principal: Principal, caseId: string, query: ApplicationQueryDto): Promise<PaginatedResult<Application>> {
+  async listForCase(principal: Principal, caseId: string, query: ApplicationQueryDto): Promise<PaginatedResult<ApplicationWithProgram>> {
     await this.scope.assertCaseAccessible(principal, caseId);
     const { field, direction } = parseSort(query.sort, SORTABLE_FIELDS, { field: 'createdAt', direction: 'desc' });
     const page = query.page ?? 1;
@@ -52,16 +68,16 @@ export class ApplicationsService {
     const where: Prisma.ApplicationWhereInput = { caseId, ...(query.status ? { status: query.status } : {}) };
 
     const [data, totalItems] = await this.prisma.$transaction([
-      this.prisma.application.findMany({ where, orderBy: { [field]: direction }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.application.findMany({ where, orderBy: { [field]: direction }, skip: (page - 1) * limit, take: limit, include: { program: PROGRAM_SUMMARY_SELECT } }),
       this.prisma.application.count({ where }),
     ]);
-    return new PaginatedResult(data, new PageMeta(page, limit, totalItems));
+    return new PaginatedResult(data as ApplicationWithProgram[], new PageMeta(page, limit, totalItems));
   }
 
   async getById(principal: Principal, id: string) {
     const application = await this.prisma.application.findUnique({
       where: { id },
-      include: { checklist: true, offers: true, scholarshipApplications: true },
+      include: { checklist: true, offers: true, scholarshipApplications: true, program: PROGRAM_SUMMARY_SELECT },
     });
     if (!application) throw new NotFoundException({ code: 'APPLICATION_NOT_FOUND', message: `Application ${id} not found.` });
     await this.scope.assertCaseAccessible(principal, application.caseId);

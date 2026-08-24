@@ -52,6 +52,19 @@ export function createStudentContact(studentId: string, input: CreateStudentCont
   return apiFetch<StudentContact>(`/students/${studentId}/contacts`, { method: "POST", body: input });
 }
 
+/// F08 — staff-side trigger for the Parent portal-access lifecycle (`PortalAccessService.
+/// inviteParent`/`revokeParentAccess`). `devToken` is only ever returned outside production
+/// (no email-delivery integration exists yet, same documented gap as password reset) — shown
+/// to the inviting staff member so they can relay the acceptance link out-of-band in this
+/// environment; never logged, never persisted client-side beyond the toast that shows it once.
+export function inviteParent(studentId: string, contactId: string): Promise<{ devToken?: string }> {
+  return apiFetch<{ devToken?: string }>(`/students/${studentId}/contacts/${contactId}/invite`, { method: "POST" });
+}
+
+export function revokeParentAccess(studentId: string, contactId: string): Promise<StudentContact> {
+  return apiFetch<StudentContact>(`/students/${studentId}/contacts/${contactId}/revoke`, { method: "POST" });
+}
+
 /// `Student.cases` has no dedicated endpoint — reuses `GET /cases?studentId=` (the filter
 /// added alongside this phase, docs/DECISIONS.md DEC-09), never a second parallel query
 /// mechanism.

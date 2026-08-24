@@ -3,8 +3,16 @@ import type { Action, Resource } from "@/lib/permissions/rbac-data";
 export interface NavItem {
   label: string;
   href: string;
-  resource: Resource;
-  action: Action;
+  /**
+   * Omit for a route with no backend permission gate at all — e.g. Notifications
+   * (`NotificationsController` has no `@RequirePermission`; every authenticated role reads
+   * only its own inbox, `docs/security/RBAC_MATRIX.md` §"notifications is not a column
+   * here"). When omitted the item is visible to every authenticated role, matching the
+   * backend's own lack of a permission check — never a `resource`/`action` invented just to
+   * make this type happy.
+   */
+  resource?: Resource;
+  action?: Action;
   /**
    * Whether this route has real page content yet. F01/F02 only built `/dashboard` as a
    * placeholder — every other domain route is F03+ scope. An unimplemented item still
@@ -45,22 +53,34 @@ export const STAFF_NAV: NavGroup[] = [
   {
     label: "Admission (master data)",
     items: [
-      { label: "Trường đại học", href: "/universities", resource: "admission_master", action: "view", implemented: false },
-      { label: "Chương trình", href: "/programs", resource: "admission_master", action: "view", implemented: false },
-      { label: "Học bổng", href: "/scholarship-masters", resource: "admission_master", action: "view", implemented: false },
+      { label: "Trường đại học", href: "/universities", resource: "admission_master", action: "view", implemented: true },
+      { label: "Chương trình", href: "/programs", resource: "admission_master", action: "view", implemented: true },
+      { label: "Học bổng", href: "/scholarship-masters", resource: "admission_master", action: "view", implemented: true },
     ],
   },
   {
     label: "Visa",
-    items: [{ label: "Mẫu checklist visa", href: "/visa-checklist-templates", resource: "visa_checklist_templates", action: "view", implemented: false }],
+    items: [{ label: "Mẫu checklist visa", href: "/visa-checklist-templates", resource: "visa_checklist_templates", action: "view", implemented: true }],
   },
   {
     label: "Đối tác",
-    items: [{ label: "Đối tác", href: "/partners", resource: "partner", action: "view", implemented: false }],
+    items: [
+      { label: "Đối tác", href: "/partners", resource: "partner", action: "view", implemented: true },
+      { label: "Giao dịch hoa hồng", href: "/commission-transactions", resource: "commission_transactions", action: "view", implemented: true },
+    ],
+  },
+  {
+    label: "Tài liệu & Thông báo",
+    items: [
+      { label: "Tài liệu", href: "/documents", resource: "documents", action: "view", implemented: true },
+      // No `resource`/`action` — self-service inbox, visible to every authenticated role
+      // (see the `NavItem.resource` doc comment).
+      { label: "Thông báo", href: "/notifications", implemented: true },
+    ],
   },
   {
     label: "Báo cáo",
-    items: [{ label: "Báo cáo", href: "/reports", resource: "reports", action: "view", implemented: false }],
+    items: [{ label: "Xuất báo cáo", href: "/reports", resource: "reports", action: "export", implemented: true }],
   },
   {
     label: "Quản trị",

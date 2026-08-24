@@ -1,4 +1,4 @@
-# FRONTEND AUTH — Phase F02
+# FRONTEND AUTH — Phase F02, addended F11 (deployment-readiness finding, §13), resolved F11A (same-origin proxy implemented, §13 updated + §14 added)
 
 Source of truth for everything below: `docs/security/AUTH_MODEL.md` (the backend's own
 write-up) + `apps/api/src/modules/identity/auth/**` + `apps/api/src/common/context/
@@ -226,3 +226,64 @@ change, not a backend code change.
   revoke` exist on the backend, unused by any F02 page) — a natural Admin/Account-settings
   feature for a later phase.
 - Any business-domain page (Leads/Students/Cases/... — F03+).
+
+## 13. F11 finding — `SameSite=Strict` and cross-origin deployment
+
+**Read before deploying the frontend to a different origin than the backend.** The refresh
+cookie's `sameSite: 'strict'` (§3 above, `apps/api/src/modules/identity/auth/
+auth.controller.ts`, hard-coded) is never sent by the browser on a cross-site request —
+`fetch()`/XHR included, regardless of `credentials: "include"`. Once the frontend is deployed
+to a different registrable domain than the backend (the entire premise of a real "frontend
+deployment," since the backend stays on Render), `POST /auth/refresh` will never receive the
+cookie: session-restore-on-reload (§2 above) and the 401-retry single-flight refresh (§4
+above) will both silently fail to authenticate via the cookie. Login itself still appears to
+work (the access token also comes back in the response body — §3's second reason for
+returning both), but the session does not survive a page reload or the 15-minute access-token
+expiry once deployed cross-origin.
+
+This was not accounted for when §3's cookie choice was made — at that time "no frontend web
+app exists in this repository yet at any phase" (§3's own words, and `docs/security/
+AUTH_MODEL.md`'s identical framing) — so same-origin was an implicit, untested assumption, not
+a deliberate cross-origin decision.
+
+**Resolved in F11A**: the recommended zero-backend-change fix (a same-origin reverse proxy)
+was implemented and verified live — `apps/web/next.config.ts`'s `rewrites()` proxies `/api/*`
+to the real backend, and `SameSite=Strict` was kept exactly as-is (confirmed unchanged via a
+real `curl -v` login response: `Set-Cookie: refresh_token=...; ...; SameSite=Strict`). See §14
+below for the one *additional* cookie-attribute issue this proxy work surfaced and required a
+minimal backend fix for.
+
+## 14. F11A finding — cookie `Path=/auth` did not survive the same-origin proxy (fixed)
+
+Implementing the §13 proxy fix surfaced a second, distinct cookie-attribute problem — proven
+live, not theoretical: a cookie's `Path` is matched against the REQUEST-URI the *browser*
+actually addresses, which happens before any reverse-proxy rewriting (the proxy is invisible
+to the browser's cookie jar). Once the frontend proxies `/api/*` to the backend, every
+browser-visible auth request becomes `/api/auth/refresh`, `/api/auth/logout`, etc. — none of
+which start with `/auth`. The refresh cookie's original `Path=/auth` therefore never matched,
+and the cookie was silently never attached to the proxied refresh/logout calls — reproduced
+directly: `curl` a login through the proxy (cookie stored, `Path=/auth`), then `curl` a
+refresh through the same proxy using that cookie jar → **401**, no `Cookie` header sent at
+all.
+
+**Fix**: `apps/api/src/modules/identity/auth/auth.controller.ts`'s `REFRESH_COOKIE_PATH`
+constant, widened from `/auth` to `/` — the only value correct regardless of deployment
+topology (direct access, this proxy, or any future proxy prefix), since `/` is a prefix of
+every path. Applied identically to both the login `Set-Cookie` and the logout `clearCookie`
+(a `Path` mismatch between the two would have silently left the old cookie alive after
+logout). `httpOnly`/`secure`/`sameSite: 'strict'` are unaffected — `Path` only scopes which
+outgoing requests attach the cookie, not who can read it or which sites receive it.
+
+**Verified live, end-to-end, through the real proxy** (not just re-reading the fixed code):
+login → cookie stored `Path=/`; refresh through the proxy using that cookie → **the cookie was
+sent, refresh succeeded, a new rotated token came back**; logout → `Set-Cookie: refresh_token=;
+Path=/; Expires=Thu, 01 Jan 1970...` (correctly clears, since the Path now matches). Also
+verified in a real browser: reloading an authenticated page correctly re-ran the full
+`/api/auth/refresh` → `/api/auth/me` bootstrap sequence with zero direct requests to the real
+backend origin visible in the Network tab.
+
+**Regression tests**: `apps/api/test/auth.e2e-spec.ts` — one new test asserting the login
+`Set-Cookie` header is `Path=/` (not `/auth`), `HttpOnly`, `SameSite=Strict`; one new test
+(the first ever for `POST /auth/logout` in this suite) asserting the logout `Set-Cookie`
+clear-header uses the same `Path=/`. Full backend regression (typecheck/lint/unit/e2e)
+re-confirmed passing after this change — see `docs/frontend/phase-status/PHASE_F11A.md`.

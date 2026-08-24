@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api/types";
 
 /// Reusable across Lead/Student/Case (F03 instruction §19) — always goes through the shared
@@ -41,13 +42,12 @@ export function NoteForm({
       <label htmlFor="note-body" className="sr-only">
         Nội dung ghi chú
       </label>
-      <textarea
+      <Textarea
         id="note-body"
         value={body}
         onChange={(e) => setBody(e.target.value)}
         placeholder="Thêm ghi chú..."
         rows={3}
-        className="w-full rounded border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
       />
       <div className="flex items-center justify-between">
         {allowSharedVisibility ? (

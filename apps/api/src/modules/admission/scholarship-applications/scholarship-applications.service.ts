@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { ScholarshipApplication, ScholarshipApplicationStatus } from '@prisma/client';
+import { ScholarshipApplication, ScholarshipApplicationStatus, ScholarshipMaster } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
@@ -12,6 +12,17 @@ import { ConfirmEligibilityDto } from './dto/confirm-eligibility.dto';
 import { CreateScholarshipApplicationDto } from './dto/create-scholarship-application.dto';
 import { UpdateScholarshipApplicationDto } from './dto/update-scholarship-application.dto';
 import { UpdateScholarshipApplicationStatusDto } from './dto/update-scholarship-application-status.dto';
+
+/// DEC-11 — mirrors DEC-09/DEC-10's `STUDENT_SUMMARY_SELECT` exactly. ScholarshipApplication
+/// list/detail is core F05 UX (workspace header "Scholarship") and only carried
+/// `scholarshipMasterId` (a bare FK) before this.
+const SCHOLARSHIP_MASTER_SUMMARY_SELECT = {
+  select: { id: true, scholarshipCode: true, provider: true, name: true, coverageType: true, amount: true, percentage: true, amountCurrency: true },
+} as const;
+
+export type ScholarshipApplicationWithMaster = ScholarshipApplication & {
+  scholarshipMaster: Pick<ScholarshipMaster, 'id' | 'scholarshipCode' | 'provider' | 'name' | 'coverageType' | 'amount' | 'percentage' | 'amountCurrency'>;
+};
 
 /// 08-admission/03_OFFER_SCHOLARSHIP.md. Kept fully separate from `ScholarshipMaster`
 /// (that master's own service, ../master-data) — this is the per-student transaction.
@@ -40,12 +51,16 @@ export class ScholarshipApplicationsService {
     private readonly idGenerator: IdGeneratorService,
   ) {}
 
-  async listForCase(principal: Principal, caseId: string): Promise<ScholarshipApplication[]> {
+  async listForCase(principal: Principal, caseId: string): Promise<ScholarshipApplicationWithMaster[]> {
     await this.scope.assertCaseAccessible(principal, caseId);
-    return this.prisma.scholarshipApplication.findMany({ where: { caseId }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.scholarshipApplication.findMany({
+      where: { caseId },
+      orderBy: { createdAt: 'desc' },
+      include: { scholarshipMaster: SCHOLARSHIP_MASTER_SUMMARY_SELECT },
+    });
   }
 
-  async getById(principal: Principal, id: string): Promise<ScholarshipApplication> {
+  async getById(principal: Principal, id: string): Promise<ScholarshipApplicationWithMaster> {
     const record = await this.findOrThrow(id);
     await this.scope.assertCaseAccessible(principal, record.caseId);
     return record;
@@ -185,8 +200,8 @@ export class ScholarshipApplicationsService {
     return record;
   }
 
-  private async findOrThrow(id: string): Promise<ScholarshipApplication> {
-    const record = await this.prisma.scholarshipApplication.findUnique({ where: { id } });
+  private async findOrThrow(id: string): Promise<ScholarshipApplicationWithMaster> {
+    const record = await this.prisma.scholarshipApplication.findUnique({ where: { id }, include: { scholarshipMaster: SCHOLARSHIP_MASTER_SUMMARY_SELECT } });
     if (!record) throw new NotFoundException({ code: 'SCHOLARSHIP_APPLICATION_NOT_FOUND', message: `ScholarshipApplication ${id} not found.` });
     return record;
   }

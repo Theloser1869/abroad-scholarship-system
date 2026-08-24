@@ -13,7 +13,7 @@ import { StatusBadge, LEAD_STATUS_VARIANT, LEAD_STATUS_LABEL } from "@/component
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
 import { PaginationControls } from "@/components/crm/pagination-controls";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Button } from "@/components/ui/button";
 import { useDebouncedValue } from "@/lib/utils/use-debounced-value";
 
@@ -47,11 +47,11 @@ function LeadsListPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="w-64">
-          <Input
+          <SearchInput
             placeholder="Tìm theo tên, email, điện thoại..."
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
+            onChange={(value) => {
+              setSearch(value);
               setPage(1);
             }}
             aria-label="Tìm kiếm lead"

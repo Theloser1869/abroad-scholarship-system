@@ -11,6 +11,7 @@ import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/quer
 import { PaginationControls } from "@/components/crm/pagination-controls";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Button } from "@/components/ui/button";
 import { useDebouncedValue } from "@/lib/utils/use-debounced-value";
 
@@ -42,11 +43,11 @@ function StudentsListPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="w-64">
-          <Input
+          <SearchInput
             placeholder="Tìm theo tên, mã học sinh..."
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
+            onChange={(value) => {
+              setSearch(value);
               setPage(1);
             }}
             aria-label="Tìm kiếm học sinh"

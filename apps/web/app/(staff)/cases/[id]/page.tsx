@@ -21,6 +21,7 @@ import { CaseStatusDialog } from "@/components/crm/cases/case-status-dialog";
 import { CaseCloseDialog } from "@/components/crm/cases/case-close-dialog";
 import { CaseMemberDialog } from "@/components/crm/cases/case-member-dialog";
 import { AssignOwnerDialog } from "@/components/crm/assign-owner-dialog";
+import { ConfirmDialog } from "@/components/crm/confirm-dialog";
 import { StatusBadge, CASE_STATUS_VARIANT, CASE_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
 import { TimelineView } from "@/components/crm/timeline-view";
@@ -53,17 +54,19 @@ export function CaseDetailContent({ id }: { id: string }) {
   const [closeOpen, setCloseOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false);
+  const [removeMemberTarget, setRemoveMemberTarget] = useState<{ userId: string; fullName: string } | null>(null);
 
   if (isLoading) return <LoadingState />;
   if (error || !caseRecord) return <QueryErrorState error={error} onRetry={() => refetch()} />;
 
   const canClose = CLOSABLE_STATUSES.has(caseRecord.status) && can("cases", "close");
 
-  async function handleRemoveMember(userId: string) {
-    if (!window.confirm("Xóa thành viên này khỏi case?")) return;
+  async function handleRemoveMember() {
+    if (!removeMemberTarget) return;
     try {
-      await removeMember.mutateAsync(userId);
+      await removeMember.mutateAsync(removeMemberTarget.userId);
       toast({ title: "Đã xóa thành viên.", variant: "success" });
+      setRemoveMemberTarget(null);
     } catch (err) {
       toast({ title: "Lỗi", description: crmErrorMessage(err), variant: "danger" });
     }
@@ -170,7 +173,7 @@ export function CaseDetailContent({ id }: { id: string }) {
                     {can("cases", "assign") ? (
                       <button
                         type="button"
-                        onClick={() => handleRemoveMember(m.userId)}
+                        onClick={() => setRemoveMemberTarget({ userId: m.userId, fullName: m.user.fullName })}
                         className="text-xs text-danger hover:underline"
                       >
                         Xóa
@@ -206,6 +209,47 @@ export function CaseDetailContent({ id }: { id: string }) {
           {can("writing", "view") ? (
             <Link href={`/cases/${id}/writing-artifacts`} className="text-primary hover:underline">
               Bài viết →
+            </Link>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Tuyển sinh</CardTitle>
+        </CardHeader>
+        <div className="flex flex-wrap gap-3 text-sm">
+          {can("applications", "view") ? (
+            <Link href={`/cases/${id}/applications`} className="text-primary hover:underline">
+              Hồ sơ ứng tuyển →
+            </Link>
+          ) : null}
+          {can("scholarship_applications", "view") ? (
+            <Link href={`/cases/${id}/scholarship-applications`} className="text-primary hover:underline">
+              Hồ sơ học bổng →
+            </Link>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Visa &amp; Nhập học</CardTitle>
+        </CardHeader>
+        <div className="flex flex-wrap gap-3 text-sm">
+          {can("visa", "view") ? (
+            <Link href={`/cases/${id}/visas`} className="text-primary hover:underline">
+              Hồ sơ visa →
+            </Link>
+          ) : null}
+          {can("pre_departure", "view") ? (
+            <Link href={`/cases/${id}/pre-departure`} className="text-primary hover:underline">
+              Chuẩn bị khởi hành →
+            </Link>
+          ) : null}
+          {can("enrollment", "view") ? (
+            <Link href={`/cases/${id}/enrollments`} className="text-primary hover:underline">
+              Hồ sơ nhập học →
             </Link>
           ) : null}
         </div>
@@ -255,6 +299,16 @@ export function CaseDetailContent({ id }: { id: string }) {
         currentOwnerId={caseRecord.ownerId}
         onSubmit={(userId) => reassignOwner.mutateAsync(userId)}
         submitting={reassignOwner.isPending}
+      />
+      <ConfirmDialog
+        open={!!removeMemberTarget}
+        onClose={() => setRemoveMemberTarget(null)}
+        title="Xóa thành viên khỏi case"
+        description={removeMemberTarget ? `${removeMemberTarget.fullName} sẽ bị xóa khỏi case này.` : undefined}
+        confirmLabel="Xóa"
+        variant="danger"
+        onConfirm={handleRemoveMember}
+        submitting={removeMember.isPending}
       />
     </div>
   );

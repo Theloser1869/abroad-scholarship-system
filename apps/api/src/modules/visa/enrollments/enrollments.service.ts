@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Enrollment } from '@prisma/client';
+import { Enrollment, Program, University } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { DocumentsService } from '../../documents/documents/documents.service';
@@ -7,6 +7,17 @@ import { ScopePolicyService } from '../../identity/rbac/scope-policy.service';
 import { ConfirmEnrollmentDto } from './dto/confirm-enrollment.dto';
 import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
+
+/// DEC-12 — mirrors DEC-09/DEC-10/DEC-11's `STUDENT_SUMMARY_SELECT` pattern exactly.
+/// Enrollment list/detail is core F06 UX ("Hiển thị: institution, program") and only
+/// carried `universityId`/`programId` (bare FKs) before this.
+const UNIVERSITY_SUMMARY_SELECT = { select: { id: true, officialName: true, countryCode: true } } as const;
+const PROGRAM_SUMMARY_SELECT = { select: { id: true, degreeLevel: true, major: true } } as const;
+
+export type EnrollmentWithRelations = Enrollment & {
+  university: Pick<University, 'id' | 'officialName' | 'countryCode'>;
+  program: Pick<Program, 'id' | 'degreeLevel' | 'major'>;
+};
 
 /// 09-visa/02_PRE_DEPARTURE_ENROLLMENT.md. "Enrollment là transaction của Student/Case,
 /// không phải master entity." Multiple Enrollment rows may exist per Case (history of
@@ -21,12 +32,16 @@ export class EnrollmentsService {
     private readonly documents: DocumentsService,
   ) {}
 
-  async listForCase(principal: Principal, caseId: string): Promise<Enrollment[]> {
+  async listForCase(principal: Principal, caseId: string): Promise<EnrollmentWithRelations[]> {
     await this.scope.assertCaseAccessible(principal, caseId);
-    return this.prisma.enrollment.findMany({ where: { caseId }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.enrollment.findMany({
+      where: { caseId },
+      orderBy: { createdAt: 'desc' },
+      include: { university: UNIVERSITY_SUMMARY_SELECT, program: PROGRAM_SUMMARY_SELECT },
+    });
   }
 
-  async getById(principal: Principal, id: string): Promise<Enrollment> {
+  async getById(principal: Principal, id: string): Promise<EnrollmentWithRelations> {
     const enrollment = await this.findOrThrow(id);
     await this.scope.assertCaseAccessible(principal, enrollment.caseId);
     return enrollment;
@@ -133,8 +148,11 @@ export class EnrollmentsService {
     return enrollment;
   }
 
-  private async findOrThrow(id: string): Promise<Enrollment> {
-    const enrollment = await this.prisma.enrollment.findUnique({ where: { id } });
+  private async findOrThrow(id: string): Promise<EnrollmentWithRelations> {
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { id },
+      include: { university: UNIVERSITY_SUMMARY_SELECT, program: PROGRAM_SUMMARY_SELECT },
+    });
     if (!enrollment) throw new NotFoundException({ code: 'ENROLLMENT_NOT_FOUND', message: `Enrollment ${id} not found.` });
     return enrollment;
   }

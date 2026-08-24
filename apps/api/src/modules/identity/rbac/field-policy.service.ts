@@ -160,7 +160,12 @@ export class FieldPolicyService {
     return { ...lor, contactEmail: null, contactPhone: null, internalNotes: null };
   }
 
-  redactScholarshipApplication(scholarshipApplication: ScholarshipApplication, roleCode: string): RedactedScholarshipApplication {
+  /// Generic over `T extends ScholarshipApplication` (not just the bare type) so a caller
+  /// passing `ScholarshipApplicationWithMaster` (DEC-11 — `scholarshipMaster` relation
+  /// summary, additive to the list/detail endpoints) keeps that field in the redacted
+  /// result's type, instead of it being silently widened away by a non-generic signature —
+  /// same fix as `redactContract` (DEC-10).
+  redactScholarshipApplication<T extends ScholarshipApplication>(scholarshipApplication: T, roleCode: string): Omit<T, 'internalNotes'> & Pick<RedactedScholarshipApplication, 'internalNotes'> {
     if (!SCHOLARSHIP_APPLICATION_REDACTED_FOR.has(roleCode as RoleCode)) {
       return scholarshipApplication;
     }
@@ -174,7 +179,12 @@ export class FieldPolicyService {
     return { ...visa, internalNotes: null };
   }
 
-  redactEnrollment(enrollment: Enrollment, roleCode: string): RedactedEnrollment {
+  /// Generic over `T extends Enrollment` (not just the bare type) so a caller passing
+  /// `EnrollmentWithRelations` (DEC-12 — `university`/`program` relation summaries,
+  /// additive to the list/detail endpoints) keeps those fields in the redacted result's
+  /// type, instead of them being silently widened away by a non-generic signature — same
+  /// fix as `redactContract` (DEC-10) / `redactScholarshipApplication` (DEC-11).
+  redactEnrollment<T extends Enrollment>(enrollment: T, roleCode: string): Omit<T, 'internalNotes'> & Pick<RedactedEnrollment, 'internalNotes'> {
     if (!ENROLLMENT_REDACTED_FOR.has(roleCode as RoleCode)) {
       return enrollment;
     }

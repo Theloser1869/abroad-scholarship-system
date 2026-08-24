@@ -76,6 +76,19 @@ describe("apiFetch", () => {
     expect(Object.keys(missingErr)).toEqual(Object.keys(outOfScopeErr));
   });
 
+  it("F11A: works with a relative same-origin base URL (NEXT_PUBLIC_API_URL=/api), including query params — never throws the way new URL() would on a bare relative string", async () => {
+    process.env.NEXT_PUBLIC_API_URL = "/api";
+    const { apiFetch } = await import("./client");
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(200, { items: [] }));
+
+    await apiFetch("/students", { query: { page: 2, search: "an" } });
+
+    const [calledUrl] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(calledUrl).toBe("/api/students?page=2&search=an");
+
+    process.env.NEXT_PUBLIC_API_URL = "https://api.test.local";
+  });
+
   it("POST /auth/refresh always sends an empty body — the refresh token is never read from a cookie and forwarded manually", async () => {
     // docs/security/AUTH_MODEL.md §3 / lib/auth/token-store.ts's file comment: the httpOnly
     // cookie is the ONLY transport for the refresh token; this client must never read

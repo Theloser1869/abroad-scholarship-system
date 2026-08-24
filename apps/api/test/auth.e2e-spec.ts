@@ -45,6 +45,17 @@ describe('Auth (e2e)', () => {
       expect(res.headers['set-cookie']?.[0]).toMatch(/refresh_token=/);
     });
 
+    it('F11A: the refresh cookie is Path=/ (not /auth) — must remain valid under a same-origin proxy prefix (e.g. /api/auth/refresh), where Path matches the browser-visible request URI, not the backend\'s own internal route', async () => {
+      const { username } = await createTestUser(prisma, 'CONSULTANT', PASSWORD);
+      const res = await request(app.getHttpServer()).post('/auth/login').send({ username, password: PASSWORD });
+      const setCookie = res.headers['set-cookie']?.[0] as string;
+      expect(setCookie).toMatch(/refresh_token=/);
+      expect(setCookie).toMatch(/Path=\//);
+      expect(setCookie).not.toMatch(/Path=\/auth\b/);
+      expect(setCookie).toMatch(/HttpOnly/);
+      expect(setCookie).toMatch(/SameSite=Strict/i);
+    });
+
     it('rejects a wrong password with a generic INVALID_CREDENTIALS (no enumeration signal)', async () => {
       const { username } = await createTestUser(prisma, 'CONSULTANT', PASSWORD);
       const res = await request(app.getHttpServer()).post('/auth/login').send({ username, password: 'wrong-password' });
@@ -141,6 +152,21 @@ describe('Auth (e2e)', () => {
 
       const revokedB = await request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${sessionB.token}`);
       expect(revokedB.status).toBe(401);
+    });
+  });
+
+  describe('logout', () => {
+    it('F11A: clears the refresh cookie with the SAME Path (/) it was set with — clearCookie only actually deletes a cookie in the browser when Path matches exactly; a mismatch (e.g. still /auth after the cookie itself moved to /) would silently leave the old cookie alive', async () => {
+      const { username } = await createTestUser(prisma, 'CONSULTANT', PASSWORD);
+      const loginRes = await request(app.getHttpServer()).post('/auth/login').send({ username, password: PASSWORD });
+      const logoutRes = await request(app.getHttpServer())
+        .post('/auth/logout')
+        .set('Authorization', `Bearer ${loginRes.body.accessToken}`);
+      expect(logoutRes.status).toBe(201);
+      const clearCookieHeader = logoutRes.headers['set-cookie']?.[0] as string;
+      expect(clearCookieHeader).toMatch(/refresh_token=;/);
+      expect(clearCookieHeader).toMatch(/Path=\//);
+      expect(clearCookieHeader).not.toMatch(/Path=\/auth\b/);
     });
   });
 

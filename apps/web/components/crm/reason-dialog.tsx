@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button, type ButtonVariant } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 
@@ -69,13 +70,12 @@ export function ReasonDialog({
             {reasonLabel}
             {reasonRequired ? " *" : " (tùy chọn)"}
           </label>
-          <textarea
+          <Textarea
             id={textareaId}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={3}
             required={reasonRequired}
-            className="w-full rounded border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
           />
         </div>
         {error ? (

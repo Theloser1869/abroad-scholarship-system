@@ -26,13 +26,12 @@ export function TableRow({ className, ...props }: HTMLAttributes<HTMLTableRowEle
   return <tr className={cn("border-b border-border last:border-0", className)} {...props} />;
 }
 
-export function TableHeaderCell({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
-  return (
-    <th
-      className={cn("px-3 py-2 font-medium text-muted-foreground", className)}
-      {...props}
-    />
-  );
+export function TableHeaderCell({ className, scope = "col", ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
+  // F09 accessibility hardening (instruction §22 "table headers") — every `<th>` in this app
+  // is a column header (no row-header usage exists anywhere), so `scope="col"` is a correct
+  // default everywhere; still overridable via the `scope` prop for the rare future case that
+  // needs one.
+  return <th scope={scope} className={cn("px-3 py-2 font-medium text-muted-foreground", className)} {...props} />;
 }
 
 export function TableCell({ className, ...props }: TdHTMLAttributes<HTMLTableCellElement>) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { resolveApiUrl } from "@/lib/api/client";
 import { requestDocumentDownload } from "@/lib/documents/api";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,18 @@ import { crmErrorMessage } from "@/lib/api/error-messages";
 /// existing 2-step signed-download flow (F04 instruction §31: "documents đi qua existing
 /// signed access flow... không direct R2 access"). Never fetches or caches the file itself —
 /// each click requests a fresh short-lived URL and opens it in a new tab immediately.
-export function EvidenceDocumentLink({ documentId }: { documentId: string | null | undefined }) {
+/// `showDetailLink` (F07 — the full Document workspace `/documents/[id]` now exists) adds a
+/// secondary link to that page for full metadata/version/share/archive actions; defaults to
+/// on since it is the only "document-linked entity context" wiring most F03-F06 pages get
+/// (F07 instruction §15) — set false only where a caller wants download-only (e.g. a compact
+/// inline usage).
+export function EvidenceDocumentLink({
+  documentId,
+  showDetailLink = true,
+}: {
+  documentId: string | null | undefined;
+  showDetailLink?: boolean;
+}) {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -32,8 +44,15 @@ export function EvidenceDocumentLink({ documentId }: { documentId: string | null
   }
 
   return (
-    <Button type="button" variant="secondary" onClick={handleClick} disabled={loading}>
-      {loading ? "Đang mở..." : "Xem tài liệu"}
-    </Button>
+    <span className="inline-flex items-center gap-2">
+      <Button type="button" variant="secondary" onClick={handleClick} disabled={loading}>
+        {loading ? "Đang mở..." : "Xem tài liệu"}
+      </Button>
+      {showDetailLink ? (
+        <Link href={`/documents/${documentId}`} className="text-sm text-primary underline-offset-2 hover:underline">
+          Chi tiết
+        </Link>
+      ) : null}
+    </span>
   );
 }
