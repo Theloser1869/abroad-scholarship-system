@@ -82,3 +82,18 @@ local `apps/api`) — see `docs/frontend/phase-status/PHASE_F11.md` "PRODUCTION-
 See `docs/frontend/FRONTEND_ROLLBACK.md`. Since no deployment has occurred, there is no
 prior deployed version to reference yet — the rollback document describes the *procedure* a
 future rollback would follow, not a specific prior artifact.
+
+## GO-LIVE UPDATE — actually deployed (this phase, supersedes the above)
+
+The working tree described above **is now committed and deployed**:
+
+- **Commits**: `932ae16a` (F05–F11A body, 298 files), `9fd0dd08` (pin Node 22.x via
+  `apps/web/package.json` `engines`), `330ea4a` (`.gitignore` update from `vercel link`) — all
+  pushed fast-forward to `origin/main` (`github.com/Theloser1869/abroad-scholarship-system`),
+  no force-push, no history rewrite.
+- **Deployed commit**: `330ea4a`.
+- **Vercel deployment**: `dpl_3ogKi9FYztRagt2c1uWxx92CDz5e`, target `production`, status
+  `Ready`. Production alias: `https://abroad-scholarship-system-web.vercel.app`.
+- **Node.js (deployed)**: `22.x` (pinned via `engines.node`; Vercel's platform default had
+  drifted to 24.x).
+- Full go-live evidence: `docs/frontend/phase-status/PHASE_FRONTEND_GO_LIVE.md`.

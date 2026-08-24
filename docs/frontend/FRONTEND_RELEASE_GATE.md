@@ -115,3 +115,9 @@ none block release per the stated gate criteria (CRITICAL=0, HIGH=0).
 ## FINAL RELEASE GATE: PASS
 
 ## READY FOR F11: YES
+
+**GO-LIVE note**: this app has since been deployed to production
+(`https://abroad-scholarship-system-web.vercel.app`, commit `330ea4a`). This document's PASS
+verdict is unaffected — nothing it covers was reopened by the deploy. See
+`docs/frontend/phase-status/PHASE_FRONTEND_GO_LIVE.md` for the deployment-specific gate
+(the live equivalent of `FRONTEND_GO_LIVE_CHECKLIST.md`'s DEPLOY section).

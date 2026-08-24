@@ -87,21 +87,24 @@ labeled gaps (see `docs/frontend/phase-status/PHASE_F11.md` "KNOWN ISSUES" for s
 
 ## DEPLOY
 
-- [ ] Host configured — **not performed** (F11 explicitly does not deploy or create cloud
-      resources). Recommended target documented (`FRONTEND_DEPLOYMENT_RUNBOOK.md`
-      "Deployment target").
-- [ ] Deployment successful — **not applicable**, no deploy attempted.
-- [ ] Smoke test (against a real deployed URL) — **not applicable** yet; the equivalent
-      local production-mode smoke test was performed and passed this phase.
-- [x] Rollback available — procedure documented (`FRONTEND_ROLLBACK.md`); nothing to roll
-      back from yet since nothing has been deployed.
+- [x] Host configured — **performed** (Go-Live phase): Vercel project
+      `theloser/abroad-scholarship-system-web`, git-connected to
+      `github.com/Theloser1869/abroad-scholarship-system`, Root Directory `apps/web`.
+- [x] Deployment successful — **performed**: production deployment
+      `dpl_3ogKi9FYztRagt2c1uWxx92CDz5e`, status Ready,
+      `https://abroad-scholarship-system-web.vercel.app`.
+- [x] Smoke test (against the real deployed URL) — **performed**: real admin login, cookie/
+      refresh/logout verified live in a real browser, zero direct Render/R2 requests observed,
+      production JS bundle scanned clean of secrets. Full detail and honest gaps (no document/
+      R2 flow test, no business-data smoke test — no fixtures, no fake data created) in
+      `docs/frontend/phase-status/PHASE_FRONTEND_GO_LIVE.md`.
+- [x] Rollback available — procedure documented (`FRONTEND_ROLLBACK.md`); reference point
+      recorded for this deploy: previous frontend commit none (first-ever deploy), deployed
+      commit `330ea4a`.
 
-## Summary
+## Summary (superseded by Go-Live)
 
-Every item this phase could actually validate locally is checked. The three genuinely
-unchecked items (clean git state, CORS origin set, cookie SameSite cross-origin fix) are all
-**deployment-time**, not code-quality, gaps — none block the frontend's *readiness*, but the
-cookie finding specifically **must be resolved (proxy or backend fallback) before the first
-real cross-origin deployment goes live**, or session-restore/refresh will silently fail in
-production. See `docs/frontend/phase-status/PHASE_F11.md` for full detail and severity
-labels.
+The three items unchecked as of F11 (clean git state, CORS origin set, cookie SameSite
+cross-origin fix) are now all resolved: F11A fixed the cookie/proxy incompatibility and this
+Go-Live phase committed/pushed the working tree and set the real CORS origin on Render. See
+`docs/frontend/phase-status/PHASE_FRONTEND_GO_LIVE.md` for the current, authoritative status.

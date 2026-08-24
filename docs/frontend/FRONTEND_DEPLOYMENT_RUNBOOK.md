@@ -253,3 +253,39 @@ the real deployed pair.
 
 See `docs/frontend/FRONTEND_ROLLBACK.md`. **Not performed in this phase** — no deployment has
 occurred yet, so there is nothing to roll back from.
+
+## 14. GO-LIVE — actually performed (this phase)
+
+Every step above was executed for real against Vercel + the real Render backend. Full detail,
+evidence, and the honest list of what was and wasn't live-verified:
+`docs/frontend/phase-status/PHASE_FRONTEND_GO_LIVE.md`. Summary:
+
+- Project: `theloser/abroad-scholarship-system-web`, Root Directory `apps/web`, framework
+  Next.js (auto-detected), install `npm ci`, build `npm run build`, Node pinned to `22.x` via
+  `apps/web/package.json`'s `engines` field (Vercel's own dashboard-only Node selector isn't
+  reachable from the CLI; `engines.node` is the CLI-reachable equivalent).
+- Env vars set exactly as planned: `NEXT_PUBLIC_API_URL=/api` (Production+Preview,
+  non-sensitive) and `API_PROXY_TARGET=https://abroad-scholarship-system.onrender.com`
+  (Production+Preview, **Sensitive** visibility — value not retrievable via `vercel env ls`).
+  No `NEXT_PUBLIC_`-prefixed proxy var exists. **Hit the known MSYS/Git-Bash path-mangling bug
+  again** setting `NEXT_PUBLIC_API_URL` (silently became a literal Windows path) — caught via
+  `vercel env pull` verification, fixed with `MSYS_NO_PATHCONV=1`.
+- First deploy: a `git push` to `main` on the newly git-connected Vercel project auto-triggers
+  a **Production** deployment directly (Vercel's default branch behavior), not a Preview —
+  worth knowing before connecting git on a fresh project if a staged preview-first rollout is
+  wanted. Deployment `dpl_3ogKi9FYztRagt2c1uWxx92CDz5e`, Ready, production alias
+  `https://abroad-scholarship-system-web.vercel.app`.
+- CORS: `CORS_ALLOWED_ORIGINS` set on Render to exactly that origin (operator-performed in the
+  Render dashboard, per this repo's policy of not using unverified third-party tooling against
+  the live backend).
+- Live browser verification (real admin login, real Vercel URL): cookie invisible to
+  `document.cookie`, `/api/auth/refresh` + `/api/auth/me` succeed through the proxy with zero
+  direct requests to `onrender.com`/R2 observed, logout revokes the session server-side
+  (post-logout refresh → `401`), 3 of the 7 open-redirect cases spot-checked live (remainder
+  covered by the already-passing F11A unit tests in the same deployed commit), production JS
+  bundle scanned clean of all listed secrets and the Render URL.
+- Not live-verified: the real document/R2 upload-download flow and the broader staff
+  business-flow smoke test (§7/§11) — the only account available (`SYSTEM_ADMIN`) deliberately
+  holds zero business-data grants by design, and no portal/business-fixture test account was
+  provided; creating fake production data to force a pass was out of scope by explicit
+  instruction. Documented as an open gap, not fabricated as a pass.

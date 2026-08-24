@@ -653,3 +653,19 @@ fix immediately after and re-ran `auth.e2e-spec.ts` in full to confirm green aga
 Never run against the production Supabase instance — `DATABASE_URL`/`DIRECT_URL` were
 overridden as shell environment variables for every invocation this phase, never by editing
 the git-ignored root `.env` file itself.
+
+## Validation results — Phase GO-LIVE (real Vercel deployment)
+
+No frontend code changed this phase beyond `apps/web/package.json`'s `engines.node` pin and
+`apps/web/.gitignore` (both infra, not app logic) — the F05–F11A build/typecheck/lint/test
+results above are unchanged and still apply to the deployed commit. What's new this phase is
+that the already-validated build was actually shipped:
+
+| Step | Result |
+|---|---|
+| Git commit + push | **PASS** — 298 files (F05–F11A) committed as `932ae16a`, plus `9fd0dd08` (Node pin) and `330ea4a` (`.gitignore`), all pushed fast-forward to `origin/main`. Pre-push secret scan: zero matches for credential-shaped patterns in the diff or any new file; `.env`/`.env.local` confirmed git-ignored and not staged. |
+| Vercel build (real, remote) | **PASS** — `theloser/abroad-scholarship-system-web`, Root Directory `apps/web`, install `npm ci`, build `npm run build`, Node `22.x`. Deployment `dpl_3ogKi9FYztRagt2c1uWxx92CDz5e`, status Ready. |
+| Live browser smoke (real admin account, real Vercel URL) | **PASS** for: login, session-restore/refresh (`/api/auth/refresh` → 201, token rotation observed across multiple navigations), `/api/auth/me`, logout (revokes server-side — post-logout refresh correctly 401), 3/7 open-redirect cases spot-checked, zero direct `onrender.com`/R2 requests in any captured network log, zero console errors on `/dashboard`/`/leads`/`/students`. **Not tested**: document/R2 upload-download and the broader business-flow pages — the only available account (`SYSTEM_ADMIN`) deliberately holds no business-data grants by design, and creating fake production data to force coverage was out of scope. |
+| Client bundle secret scan | **PASS** — all 14 production JS chunks (from `/`, `/login`, `/dashboard`) downloaded and grepped: zero matches for `onrender.com`, `API_PROXY_TARGET`, `supabase.co`, `r2.cloudflarestorage`, or any of the 8 explicitly-listed backend secret names. `"/api"` confirmed baked in as the intended relative path. |
+
+Full narrative, evidence, and the honest gap list: `docs/frontend/phase-status/PHASE_FRONTEND_GO_LIVE.md`.
