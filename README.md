@@ -1,168 +1,136 @@
-# Claude Code Implementation Pack
-## Hệ thống quản lý du học & học bổng
+# Hệ thống Quản lý Du học & Học bổng
 
-Bộ thư mục này biến SRS thành một quy trình triển khai tuần tự cho Claude Code.
+Hệ thống CRM nội bộ quản lý toàn bộ vòng đời tư vấn du học/học bổng — từ Lead, ký hợp đồng, đánh giá năng lực, xây roadmap, phát triển hồ sơ, ứng tuyển, xin học bổng, xin visa, đến nhập học và thanh lý hợp đồng — kèm theo Cổng thông tin (Portal) riêng cho Học sinh/Phụ huynh và một module CRM đối tác (trường/tổ chức học bổng/agent) có theo dõi hoa hồng.
 
-## 1. Mục tiêu
+Dự án được triển khai theo 21 sheet yêu cầu gốc của khách hàng (`docs/He_thong_quan_ly_du_hoc_hoc_bong.xlsx`) và SRS đầy đủ (`docs/SRS_He_thong_quan_ly_du_hoc_hoc_bong.docx`).
 
-Không đưa toàn bộ yêu cầu vào Claude Code trong một lần.
+## Trạng thái hiện tại
 
-Claude phải đi theo chuỗi:
+**Client Acceptance: PASS WITH CONDITIONS** (vòng Re-Audit thứ 2). Toàn bộ hồ sơ nghiệm thu — ma trận 130 yêu cầu, các gap còn tồn đọng, 4 conflict cần khách hàng xác nhận, và gói tài liệu xác nhận chính thức — nằm tại [`docs/requirements/`](docs/requirements/):
 
-00 Context
-→ 01 Discovery
-→ 02 Foundation
-→ 03 Security
-→ 04 Core CRM
-→ 05 Commercial
-→ 06 Operations
-→ 07 Profile
-→ 08 Admission
-→ 09 Visa
-→ 10 Partners
-→ 11 Portal
-→ 12 Platform
-→ 13 QA
-→ 14 Production
+- [`CLIENT_ACCEPTANCE_REAUDIT_ROUND2.md`](docs/requirements/CLIENT_ACCEPTANCE_REAUDIT_ROUND2.md) — báo cáo nghiệm thu mới nhất
+- [`CLIENT_ACCEPTANCE_MATRIX.md`](docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md) — đối chiếu từng yêu cầu với evidence trong code
+- [`CLIENT_REQUIREMENTS_GAPS.md`](docs/requirements/CLIENT_REQUIREMENTS_GAPS.md) — danh sách gap còn mở, xếp theo mức độ nghiêm trọng
+- [`CLIENT_CLARIFICATION_SIGNOFF.md`](docs/requirements/CLIENT_CLARIFICATION_SIGNOFF.md) — các quyết định nghiệp vụ cần khách hàng xác nhận trước khi đóng các gap còn lại
 
-Mỗi phase:
-1. đọc prompt tương ứng;
-2. đọc SRS;
-3. kiểm tra code hiện tại;
-4. triển khai;
-5. chạy migration/test/typecheck/lint/build;
-6. cập nhật checkpoint;
-7. chỉ chuyển phase sau khi phase hiện tại PASS.
+## Kiến trúc & Công nghệ
 
-## 2. Thứ tự chạy prompt
+Monorepo dùng npm workspaces, gồm 2 ứng dụng:
 
-### Bắt buộc
-- 00-context/00_MASTER_CONTEXT.md
-- 01-discovery/01_REPOSITORY_AUDIT.md
-- 01-discovery/02_TARGET_ARCHITECTURE.md
-- 02-foundation/01_DATABASE_FOUNDATION.md
-- 02-foundation/02_API_FOUNDATION.md
-- 03-security/01_AUTH.md
-- 03-security/02_RBAC.md
-- 03-security/03_AUDIT.md
-- 04-core-crm/01_LEAD.md
-- 04-core-crm/02_STUDENT_CASE.md
-- 05-commercial/01_CONTRACT.md
-- 05-commercial/02_PAYMENT.md
-- 06-operations/01_TASK.md
-- 06-operations/02_NOTIFICATION.md
-- 07-profile/01_ASSESSMENT_ROADMAP.md
-- 07-profile/02_PROFILE_EVIDENCE.md
-- 07-profile/03_WRITING.md
-- 08-admission/01_MASTER_DATA.md
-- 08-admission/02_APPLICATION.md
-- 08-admission/03_OFFER_SCHOLARSHIP.md
-- 09-visa/01_VISA.md
-- 09-visa/02_PRE_DEPARTURE_ENROLLMENT.md
-- 10-partners/01_PARTNER_CRM.md
-- 11-portal/01_STUDENT_PARENT_PORTAL.md
-- 12-platform/01_DOCUMENTS.md
-- 12-platform/02_INTEGRATIONS_JOBS.md
-- 12-platform/03_REPORTING.md
-- 13-qa/01_FULL_TRACEABILITY.md
-- 13-qa/02_SECURITY_REVIEW.md
-- 13-qa/03_UAT_REVIEW.md
-- 14-production/01_PRODUCTION_HARDENING.md
-- 14-production/02_FINAL_ARCHITECT_REVIEW.md
+| | Công nghệ | Thư mục |
+|---|---|---|
+| **Backend API** | NestJS 11 + Prisma 6 + PostgreSQL | `apps/api` |
+| **Frontend** | Next.js 16 (App Router) + Tailwind CSS 4 | `apps/web` |
+| **Database** | PostgreSQL, schema/migration dùng chung | `database/` |
 
-## 3. Quy tắc quan trọng
+Điểm nhấn kiến trúc:
+- **RBAC hai lớp**: phân quyền theo vai trò (8 role) + phân quyền theo phạm vi bản ghi (Case Ownership, `ScopePolicyService`) + field-level redaction cho dữ liệu nhạy cảm (`FieldPolicyService`).
+- **Audit log đầy đủ**: mọi hành động VIEW/EDIT/DOWNLOAD/EXPORT/SHARE đều ghi log qua `AuditInterceptor`, bao gồm cả các lượt bị từ chối.
+- **Business ID tách biệt UUID**: mọi entity có cả UUID (khóa chính, dùng cho authorization) lẫn mã nghiệp vụ tự sinh (`HS-2026-00001`, `HD-2026-00001`...) — không authorization nào dựa trên mã nghiệp vụ.
+- **Migration chỉ cộng thêm (additive-only)**: không có migration phá vỡ dữ liệu hiện có trong toàn bộ lịch sử dự án.
+- **Tài liệu không public URL**: mọi file đều đi qua download được proxy qua backend, kiểm tra quyền + trạng thái scan trước khi trả về.
 
-- Không bỏ qua phase nếu phase trước còn FAIL.
-- Không tạo entity trùng tên hoặc trùng ý nghĩa.
-- Không sửa schema thủ công ngoài migration.
-- Không đưa authorization chỉ ở frontend.
-- Không dùng public URL cho private document.
-- Không overwrite signed/final/legal records.
-- Không hard-delete audit/legal records.
-- Mọi thay đổi nhạy cảm phải có audit.
-- Khi requirement mơ hồ, tạo assumption và ghi vào docs/ASSUMPTIONS.md.
-- Khi phát hiện requirement mâu thuẫn, dừng feature và ghi vào docs/DECISIONS.md.
+## Bắt đầu (Local Development)
 
-## 4. Cách gọi Claude Code
+### Yêu cầu
+- Node.js 22.x
+- Docker (chạy PostgreSQL local)
 
-### Bước A
-Mở repository dự án.
+### 1. Cài đặt
 
-### Bước B
-Đảm bảo SRS có sẵn trong repository, ví dụ:
-docs/SRS_He_thong_quan_ly_du_hoc_hoc_bong.docx
-
-### Bước C
-Dán prompt 00-context/00_MASTER_CONTEXT.md.
-
-### Bước D
-Sau khi Claude báo PASS, dán prompt tiếp theo theo thứ tự.
-
-### Bước E
-Sau mỗi prompt, dán:
-checkpoints/PHASE_CHECKPOINT.md
-
-với `<PHASE_NAME>` thay bằng phase hiện tại.
-
-## 5. Cơ chế checkpoint
-
-Mỗi phase phải tạo:
-docs/phase-status/<phase>.md
-
-Nội dung tối thiểu:
-- status
-- scope
-- implemented
-- files changed
-- migrations
-- API
-- UI
-- tests
-- assumptions
-- risks
-- known issues
-- commands
-- next dependency
-
-## 6. Nếu Claude làm sai
-
-Không bắt Claude tiếp tục xây thêm.
-
-Dùng:
-checkpoints/RECOVERY_FROM_WRONG_IMPLEMENTATION.md
-
-## 7. Cấu trúc source code khuyến nghị
-
-```text
-project/
-├─ apps/
-│  ├─ web/
-│  └─ api/
-├─ packages/
-│  ├─ ui/
-│  ├─ auth/
-│  ├─ config/
-│  ├─ types/
-│  └─ domain/
-├─ database/
-│  ├─ migrations/
-│  ├─ seeds/
-│  └─ fixtures/
-├─ storage/
-├─ workers/
-├─ tests/
-│  ├─ unit/
-│  ├─ integration/
-│  ├─ e2e/
-│  ├─ security/
-│  └─ fixtures/
-├─ docs/
-│  ├─ architecture/
-│  ├─ api/
-│  ├─ database/
-│  ├─ security/
-│  └─ phase-status/
-└─ scripts/
+```bash
+npm install
 ```
 
-Nếu repository hiện tại không theo cấu trúc này, Claude phải thích nghi thay vì rewrite vô điều kiện.
+### 2. Khởi động PostgreSQL local
+
+```bash
+docker compose up -d
+```
+
+### 3. Cấu hình môi trường
+
+```bash
+cp .env.example .env
+```
+
+Giá trị mặc định trong `.env.example` đã trỏ đúng vào Postgres local (`localhost:55432`) và `STORAGE_PROVIDER=local` — không cần sửa gì thêm cho dev. **Lưu ý riêng cho `PORT`**: để trống dòng `PORT=` hoàn toàn (không để `PORT=` rỗng) — `main.ts` dùng `process.env.PORT ?? process.env.API_PORT ?? 3000`, và `??` chỉ fallback khi giá trị là `null`/`undefined`, không fallback khi là chuỗi rỗng.
+
+### 4. Migrate + seed dữ liệu demo
+
+```bash
+npm run db:migrate:dev
+npm run db:seed
+```
+
+Seed tạo sẵn 11 tài khoản demo (một tài khoản cho mỗi vai trò, một số case/lead/task mẫu). Mật khẩu cho **mọi** tài khoản demo: `DemoPass!123`.
+
+| Username | Vai trò |
+|---|---|
+| `demo.director` | Giám đốc điều hành |
+| `demo.manager` | Trưởng phòng |
+| `demo.consultant.a` / `demo.consultant.b` | Nhân viên tư vấn |
+| `demo.docspecialist` | Nhân viên xử lý hồ sơ |
+| `demo.sales` / `demo.sales.b` | Sale/Marketing |
+| `demo.finance` | HCTH (Hành chính - Tài chính) |
+| `demo.student.self` | Học sinh (Portal) |
+| `demo.parent.linked` / `demo.parent.unlinked` | Phụ huynh (Portal) |
+
+### 5. Chạy dev server
+
+```bash
+npm run api:start      # backend — http://localhost:3000
+npm run web:dev         # frontend — http://localhost:3001
+```
+
+Đăng nhập tại `http://localhost:3001/login` bằng một trong các tài khoản demo ở trên.
+
+## Cấu trúc thư mục
+
+```text
+apps/
+  api/                # NestJS backend — 1 module/domain nghiệp vụ (contracts, cases, visas, partners...)
+  web/                # Next.js frontend — (staff) = CRM nội bộ, (portal) = Cổng học sinh/phụ huynh
+database/
+  schema.prisma       # schema duy nhất, dùng chung cho toàn hệ thống
+  migrations/         # lịch sử migration, additive-only
+  seeds/               # seed.ts — tài khoản demo + dữ liệu mẫu
+docs/
+  requirements/        # ma trận nghiệm thu, gap, conflict, tài liệu xác nhận khách hàng
+  architecture/        # kiến trúc hệ thống
+  security/            # RBAC matrix, các nguyên tắc bảo mật
+  frontend/            # route map, quy ước frontend
+  api/                 # API conventions
+  database/            # data dictionary, ERD
+  ASSUMPTIONS.md        # mọi giả định kỹ thuật khi yêu cầu chưa rõ, có đánh số ASM-XX
+  DECISIONS.md          # quyết định kiến trúc khi phát hiện yêu cầu mâu thuẫn
+```
+
+## Kiểm thử
+
+```bash
+npm run api:test          # backend unit tests
+npm run api:test:e2e      # backend e2e (yêu cầu Postgres local đang chạy)
+npm run web:test          # frontend tests
+npm run api:typecheck && npm run web:typecheck
+npm run api:lint && npm run web:lint
+```
+
+**Lưu ý khi chạy e2e trên Windows**: chạy tuần tự (`jest --runInBand`) thay vì mặc định song song — bộ e2e test dùng chung một database, và trên Windows có một bug đã biết (`jest-worker EPERM: kill`) khiến tiến trình worker không tắt sạch giữa các lần chạy, gây tràn connection nếu chạy nhiều lần liên tiếp ở chế độ song song.
+
+## Triển khai (Production)
+
+Xem [`docs/DEPLOYMENT_ENV.md`](docs/DEPLOYMENT_ENV.md) (biến môi trường production) và [`docs/DEPLOYMENT_FREE.md`](docs/DEPLOYMENT_FREE.md) (hướng dẫn deploy free-tier: frontend trên Vercel, backend + Postgres trên Render).
+
+**Không bao giờ** trỏ `DATABASE_URL`/`DIRECT_URL` local vào production, và không chạy `prisma migrate reset` ngoài môi trường dev đã xác nhận.
+
+## Vai trò & phân quyền
+
+Hệ thống có 7 vai trò nghiệp vụ theo yêu cầu khách hàng (Giám đốc điều hành, Trưởng phòng, Tư vấn, Xử lý hồ sơ, Sale/Marketing, HCTH, Học sinh/Phụ huynh) cộng 1 vai trò kỹ thuật nội bộ (`SYSTEM_ADMIN`, không có quyền truy cập dữ liệu nghiệp vụ nào — xem `docs/requirements/CLIENT_REQUIREMENT_CONFLICTS.md` CONFLICT-002 để biết vì sao vai trò này chưa được khách hàng chính thức xác nhận). Ma trận phân quyền đầy đủ theo module nằm tại `docs/security/`.
+
+## Tài liệu tham khảo khác
+
+- `docs/PROJECT_STRUCTURE.md` — giải thích chi tiết cấu trúc thư mục
+- `docs/PHASE_MAP.md` — lịch sử các phase triển khai
+- `docs/REQUIREMENTS_TRACEABILITY.md` — truy vết yêu cầu gốc → code
+- `docs/FINAL_ARCHITECT_REVIEW.md` — đánh giá kiến trúc tổng thể cuối kỳ
