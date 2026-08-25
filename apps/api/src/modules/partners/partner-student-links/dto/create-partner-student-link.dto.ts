@@ -15,6 +15,15 @@ export class CreatePartnerStudentLinkDto {
   @IsUUID()
   applicationId?: string;
 
+  /// Client Acceptance Remediation GAP-006 (REQ-PARTNER-008) — 16_Contract_Partner_Link.
+  @IsOptional()
+  @IsUUID()
+  contractId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  scholarshipApplicationId?: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(100)

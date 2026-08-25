@@ -133,7 +133,7 @@ export class ContractsController {
   async updateStatus(@CurrentUser() principal: Principal | null, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateContractStatusDto) {
     const actor = requirePrincipal(principal);
     await this.contracts.getById(actor, id);
-    const contract = await this.contracts.updateStatus(id, dto.status);
+    const contract = await this.contracts.updateStatus(id, dto.status, dto.reason);
     return this.fieldPolicy.redactContract(contract, actor.roleCode);
   }
 

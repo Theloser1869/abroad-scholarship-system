@@ -13,9 +13,10 @@ const CODE_MESSAGES: Record<string, string> = {
   CASE_NOT_FOUND: "Không tìm thấy case.",
   STUDENT_NOT_FOUND: "Không tìm thấy học sinh.",
   DUPLICATE_ACTIVE_CASE: "Học sinh này đã có case đang hoạt động.",
+  STUDENT_PROFILE_INCOMPLETE: "Hồ sơ học sinh còn thiếu thông tin bắt buộc (ngày sinh, quốc gia/ngành/đợt mục tiêu, mục tiêu học bổng, hoặc lớp/GPA) — cần bổ sung trước khi duyệt đánh giá.",
   INVALID_STATUS_TRANSITION: "Không thể chuyển sang trạng thái này từ trạng thái hiện tại.",
   OPEN_TASKS_REMAIN: "Còn task chưa hoàn thành — không thể đóng case.",
-  OUTSTANDING_DEBT_REMAINS: "Còn công nợ chưa thanh toán — không thể đóng case.",
+  OUTSTANDING_DEBT_REMAINS: "Còn công nợ chưa thanh toán — cần xử lý trước khi tiếp tục.",
   VISA_IN_PROGRESS: "Hồ sơ visa đang xử lý — không thể đóng case.",
   ENROLLMENT_NOT_CONFIRMED: "Chưa xác nhận nhập học — không thể đóng case.",
   PRE_DEPARTURE_CHECKLIST_INCOMPLETE: "Checklist trước khi khởi hành chưa hoàn tất — không thể đóng case.",
@@ -31,6 +32,8 @@ const CODE_MESSAGES: Record<string, string> = {
   CASE_ALREADY_LINKED: "Case này đã liên kết với một hợp đồng khác.",
   CONTRACT_NOT_YET_SIGNED: "Hợp đồng chưa được ký — chưa thể thực hiện thao tác này.",
   NO_MATERIAL_CHANGE: "Không có thay đổi thực sự nào so với điều khoản hiện tại.",
+  PAYMENT_REQUIRED_FOR_ACTIVATION: "Hợp đồng chưa ghi nhận khoản thanh toán nào — cần ghi nhận ít nhất một khoản thanh toán trước khi kích hoạt.",
+  CLOSURE_REASON_REQUIRED: "Cần nhập lý do/biên bản thanh lý trước khi thanh lý hợp đồng.",
 
   // F04 — Payment (apps/api/src/modules/commercial/payments)
   PAYMENT_NOT_FOUND: "Không tìm thấy khoản thanh toán.",
@@ -190,6 +193,7 @@ const CODE_MESSAGES: Record<string, string> = {
   TASK_NOT_FOUND: "Không tìm thấy nhiệm vụ hoặc bạn không có quyền truy cập.",
   INVALID_TASK_STATUS_TRANSITION: "Không thể chuyển nhiệm vụ sang trạng thái này.",
   BLOCKER_REQUIRED: "Cần nêu lý do khi chuyển nhiệm vụ sang trạng thái bị chặn.",
+  OUTPUT_REQUIRED: "Cần nhập kết quả công việc (output) trước khi đánh dấu hoàn thành.",
   DOCUMENT_NOT_OWNED: "Bạn chỉ có thể gửi tài liệu do chính mình tải lên.",
   STUDENT_CONTACT_NOT_FOUND: "Không tìm thấy liên hệ này.",
   PARENT_ALREADY_ACTIVE: "Liên hệ này đã có quyền truy cập cổng thông tin đang hoạt động.",
@@ -198,6 +202,10 @@ const CODE_MESSAGES: Record<string, string> = {
   INVALID_OR_USED_INVITATION: "Đường dẫn mời này không hợp lệ hoặc đã được sử dụng.",
   CREDENTIALS_REQUIRED: "Cần nhập tên đăng nhập và mật khẩu để tạo tài khoản cổng thông tin.",
   EMAIL_BELONGS_TO_STAFF_ACCOUNT: "Email này thuộc về một tài khoản nhân viên nội bộ, không thể dùng cho phụ huynh.",
+
+  // Client Acceptance Remediation GAP-001/GAP-002 (apps/api/src/common/export/export-row-cap.ts,
+  // apps/api/src/modules/commercial/contracts/contracts.service.ts)
+  EXPORT_ROW_LIMIT_EXCEEDED: "Kết quả xuất vượt quá giới hạn cho phép — vui lòng thu hẹp bộ lọc rồi thử lại.",
 };
 
 export function crmErrorMessage(error: unknown): string {

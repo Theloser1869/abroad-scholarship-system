@@ -118,6 +118,11 @@ export function ContractDetailContent({ id }: { id: string }) {
               Chuyển trạng thái
             </Button>
           ) : null}
+          {["ACTIVE", "COMPLETED", "LIQUIDATED"].includes(contract.status) && can("contracts", "edit") ? (
+            <Link href={`/contracts/${contract.id}/closure`}>
+              <Button variant="secondary">Hoàn tất / Thanh lý</Button>
+            </Link>
+          ) : null}
           {canAmend ? (
             <Button variant="secondary" onClick={() => setAmendOpen(true)}>
               + Amendment
@@ -239,7 +244,7 @@ export function ContractDetailContent({ id }: { id: string }) {
         open={statusOpen}
         onClose={() => setStatusOpen(false)}
         currentStatus={contract.status}
-        onSubmit={(status) => updateStatus.mutateAsync(status)}
+        onSubmit={(status, reason) => updateStatus.mutateAsync({ status, reason })}
         submitting={updateStatus.isPending}
       />
       <ContractAmendmentDialog

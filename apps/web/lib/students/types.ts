@@ -15,6 +15,8 @@ export interface Student {
   targetCountry: string | null;
   targetMajor: string | null;
   targetIntake: string | null;
+  /** Client Acceptance Remediation GAP-005 — required before Assessment approval (409 STUDENT_PROFILE_INCOMPLETE), not at creation. */
+  scholarshipGoal: string | null;
   /** Decimal, serialized as a string by Prisma's own JSON encoding — or null (redacted, or genuinely unset). */
   budget: string | null;
   budgetCurrency: string | null;
@@ -58,6 +60,7 @@ export interface CreateStudentInput {
   targetCountry?: string;
   targetMajor?: string;
   targetIntake?: string;
+  scholarshipGoal?: string;
   budget?: number;
   budgetCurrency?: string;
 }

@@ -24,6 +24,7 @@ function makeTransaction(overrides: Partial<CommissionTransaction> = {}): Commis
     student: { id: "student-1", studentCode: "STU-2026-00001", fullName: "Tran Thi B" },
     caseId: null,
     applicationId: null,
+    contractId: null,
     sourceType: "Payment",
     sourceId: "payment-12345678",
     basis: "PAYMENT_COLLECTED",

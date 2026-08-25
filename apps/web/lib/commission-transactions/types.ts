@@ -48,6 +48,8 @@ export interface CommissionTransaction {
   student: CommissionTransactionStudentSummary | null;
   caseId: string | null;
   applicationId: string | null;
+  /** Client Acceptance Remediation GAP-006 — auto-resolved from sourceType/sourceId at create() time, never client-supplied. */
+  contractId: string | null;
   sourceType: CommissionSourceType;
   sourceId: string | null;
   basis: string | null;

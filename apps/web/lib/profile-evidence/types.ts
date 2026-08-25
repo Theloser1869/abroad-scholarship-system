@@ -10,6 +10,8 @@ export interface AcademicRecord {
   caseId: string;
   school: string;
   period: string;
+  /** Client Acceptance Remediation GAP-004 — required (with gpa) before Assessment approval (409 STUDENT_PROFILE_INCOMPLETE). */
+  grade: string | null;
   gpa: string | null;
   gradingScale: string | null;
   evidenceDocumentId: string | null;
@@ -94,6 +96,7 @@ export interface Activity {
 export interface CreateAcademicRecordInput {
   school: string;
   period: string;
+  grade?: string;
   gpa?: number;
   gradingScale?: string;
   evidenceDocumentId?: string;

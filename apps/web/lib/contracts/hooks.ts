@@ -100,7 +100,7 @@ export function useSignContract(id: string) {
 export function useUpdateContractStatus(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (status: string) => contractsApi.updateContractStatus(id, status),
+    mutationFn: ({ status, reason }: { status: string; reason?: string }) => contractsApi.updateContractStatus(id, status, reason),
     onSuccess: () => invalidateContract(queryClient, id),
   });
 }

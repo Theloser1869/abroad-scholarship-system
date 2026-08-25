@@ -21,6 +21,8 @@ function makeLink(overrides: Partial<PartnerStudentLink> = {}): PartnerStudentLi
     student: { id: "student-1", studentCode: "STU-2026-00001", fullName: "Tran Thi B" },
     caseId: null,
     applicationId: null,
+    contractId: null,
+    scholarshipApplicationId: null,
     linkType: "Referral",
     status: "ACTIVE",
     effectiveDate: null,

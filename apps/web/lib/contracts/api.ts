@@ -56,9 +56,11 @@ export function signContract(id: string, signedDocumentId: string): Promise<Cont
 }
 
 /// Only the 4 linear post-sign moves (`MANUAL_CONTRACT_STATUSES`) — `409
-/// INVALID_STATUS_TRANSITION` for anything else, FSM-validated server-side.
-export function updateContractStatus(id: string, status: string): Promise<Contract> {
-  return apiFetch<Contract>(`/contracts/${id}/status`, { method: "PATCH", body: { status } });
+/// INVALID_STATUS_TRANSITION` for anything else, FSM-validated server-side. `reason` is
+/// required (non-empty) server-side only when `status === "LIQUIDATED"` (Client Acceptance
+/// Remediation GAP-007) — ignored for every other target status.
+export function updateContractStatus(id: string, status: string, reason?: string): Promise<Contract> {
+  return apiFetch<Contract>(`/contracts/${id}/status`, { method: "PATCH", body: { status, reason } });
 }
 
 export function listContractAmendments(id: string): Promise<ContractAmendment[]> {

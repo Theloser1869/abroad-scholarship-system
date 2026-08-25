@@ -26,6 +26,7 @@ export function AcademicRecordDialog({
 }) {
   const [school, setSchool] = useState("");
   const [period, setPeriod] = useState("");
+  const [grade, setGrade] = useState("");
   const [gpa, setGpa] = useState("");
   const [gradingScale, setGradingScale] = useState("");
   const [evidenceDocumentId, setEvidenceDocumentId] = useState("");
@@ -35,6 +36,7 @@ export function AcademicRecordDialog({
   useResetOnOpen(open, () => {
     setSchool(record?.school ?? "");
     setPeriod(record?.period ?? "");
+    setGrade(record?.grade ?? "");
     setGpa(record?.gpa ?? "");
     setGradingScale(record?.gradingScale ?? "");
     setEvidenceDocumentId(record?.evidenceDocumentId ?? "");
@@ -49,6 +51,7 @@ export function AcademicRecordDialog({
       await onSubmit({
         school: school.trim(),
         period: period.trim(),
+        grade: grade.trim() || undefined,
         gpa: gpa ? Number(gpa) : undefined,
         gradingScale: gradingScale || undefined,
         evidenceDocumentId: evidenceDocumentId || undefined,
@@ -77,7 +80,13 @@ export function AcademicRecordDialog({
             <Input id="academic-period" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="Grade 11, 2024–2025" required />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label htmlFor="academic-grade" className="mb-1 block text-sm font-medium">
+              Lớp
+            </label>
+            <Input id="academic-grade" value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="Lớp 11" />
+          </div>
           <div>
             <label htmlFor="academic-gpa" className="mb-1 block text-sm font-medium">
               GPA
@@ -91,6 +100,7 @@ export function AcademicRecordDialog({
             <Input id="academic-scale" value={gradingScale} onChange={(e) => setGradingScale(e.target.value)} placeholder="4.0, 10, %..." />
           </div>
         </div>
+        <p className="text-xs text-muted-foreground">Lớp và GPA cùng với hồ sơ học sinh cần điền đầy đủ trước khi duyệt đánh giá (Assessment).</p>
         <div>
           <label htmlFor="academic-evidence" className="mb-1 block text-sm font-medium">
             Document ID minh chứng

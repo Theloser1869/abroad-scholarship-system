@@ -213,6 +213,73 @@ describe('Tasks (e2e)', () => {
       expect(resumed.status).toBe(200);
     });
 
+    /// Client Acceptance Remediation GAP-003 (HIGH) — sheet00/06 "Mọi công việc phải có
+    /// Owner + Deadline + Output + Status". See docs/ASSUMPTIONS.md ASM-89: Output is
+    /// required at the DONE transition (mirroring the pre-existing BLOCKED/blocker
+    /// precondition immediately above), never at creation.
+    describe('DONE requires a non-empty output (GAP-003)', () => {
+      it('a task is created successfully with no output field at all (output is not a create-time concept)', async () => {
+        const task = await createTask(caseAId, consultantAToken);
+        expect(task.output).toBeFalsy();
+      });
+
+      it('rejects moving IN_PROGRESS -> DONE with no output ever supplied (409 OUTPUT_REQUIRED)', async () => {
+        const task = await createTask(caseAId, consultantAToken);
+        await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
+        const res = await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('OUTPUT_REQUIRED');
+      });
+
+      it('rejects DONE with a whitespace-only output (still counts as empty)', async () => {
+        const task = await createTask(caseAId, consultantAToken);
+        await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
+        const res = await request(app.getHttpServer())
+          .patch(`/tasks/${task.id}/status`)
+          .set('Authorization', `Bearer ${consultantAToken}`)
+          .send({ status: 'DONE', output: '   ' });
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('OUTPUT_REQUIRED');
+      });
+
+      it('allows DONE when output is supplied in the same request', async () => {
+        const task = await createTask(caseAId, consultantAToken);
+        await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
+        const res = await request(app.getHttpServer())
+          .patch(`/tasks/${task.id}/status`)
+          .set('Authorization', `Bearer ${consultantAToken}`)
+          .send({ status: 'DONE', output: 'Sent the acceptance email to the student.' });
+        expect(res.status).toBe(200);
+        expect(res.body.status).toBe('DONE');
+        expect(res.body.output).toBe('Sent the acceptance email to the student.');
+      });
+
+      it('allows DONE when output was already recorded on an earlier update, without resupplying it', async () => {
+        const task = await createTask(caseAId, consultantAToken);
+        await request(app.getHttpServer())
+          .patch(`/tasks/${task.id}/status`)
+          .set('Authorization', `Bearer ${consultantAToken}`)
+          .send({ status: 'IN_PROGRESS', output: 'Draft prepared, awaiting final review.' });
+        const res = await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
+        expect(res.status).toBe(200);
+        expect(res.body.output).toBe('Draft prepared, awaiting final review.');
+      });
+
+      it('a denied DONE attempt (missing output) is still audited', async () => {
+        const task = await createTask(caseAId, consultantAToken);
+        await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
+        const res = await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
+        expect(res.status).toBe(409);
+
+        const auditRow = await prisma.auditLog.findFirst({
+          where: { objectType: 'Tasks', objectId: task.id },
+          orderBy: { createdAt: 'desc' },
+        });
+        expect(auditRow).not.toBeNull();
+        expect(auditRow?.result).toBe('ERROR');
+      });
+    });
+
     it('a terminal (DONE/CANCELLED) task can no longer be edited (409)', async () => {
       const task = await createTask(caseAId, consultantAToken);
       await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'CANCELLED' });
@@ -271,20 +338,25 @@ describe('Tasks (e2e)', () => {
         .send({ dependsOnTaskId: prerequisite.id });
 
       await request(app.getHttpServer()).patch(`/tasks/${dependent.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
+      // Client Acceptance Remediation GAP-003 — output supplied so this attempt isolates
+      // PREREQUISITE_NOT_DONE specifically, rather than tripping OUTPUT_REQUIRED instead.
       const blocked = await request(app.getHttpServer())
         .patch(`/tasks/${dependent.id}/status`)
         .set('Authorization', `Bearer ${consultantAToken}`)
-        .send({ status: 'DONE' });
+        .send({ status: 'DONE', output: 'Dependent work finished.' });
       expect(blocked.status).toBe(409);
       expect(blocked.body.error.code).toBe('PREREQUISITE_NOT_DONE');
 
       await request(app.getHttpServer()).patch(`/tasks/${prerequisite.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
-      await request(app.getHttpServer()).patch(`/tasks/${prerequisite.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
+      await request(app.getHttpServer())
+        .patch(`/tasks/${prerequisite.id}/status`)
+        .set('Authorization', `Bearer ${consultantAToken}`)
+        .send({ status: 'DONE', output: 'Prerequisite work finished.' });
 
       const nowDone = await request(app.getHttpServer())
         .patch(`/tasks/${dependent.id}/status`)
         .set('Authorization', `Bearer ${consultantAToken}`)
-        .send({ status: 'DONE' });
+        .send({ status: 'DONE', output: 'Dependent work finished.' });
       expect(nowDone.status).toBe(200);
       expect(nowDone.body.status).toBe('DONE');
     });
@@ -299,7 +371,10 @@ describe('Tasks (e2e)', () => {
 
       await request(app.getHttpServer()).patch(`/tasks/${prerequisite.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'CANCELLED' });
       await request(app.getHttpServer()).patch(`/tasks/${dependent.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
-      const res = await request(app.getHttpServer()).patch(`/tasks/${dependent.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
+      const res = await request(app.getHttpServer())
+        .patch(`/tasks/${dependent.id}/status`)
+        .set('Authorization', `Bearer ${consultantAToken}`)
+        .send({ status: 'DONE', output: 'Dependent work finished.' });
       expect(res.status).toBe(200);
     });
 
@@ -367,7 +442,11 @@ describe('Tasks (e2e)', () => {
     it('a DONE task is never overdue even with a past deadline', async () => {
       const task = await createTask(caseAId, consultantAToken, { deadline: '2020-01-01' });
       await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
-      await request(app.getHttpServer()).patch(`/tasks/${task.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
+      const doneRes = await request(app.getHttpServer())
+        .patch(`/tasks/${task.id}/status`)
+        .set('Authorization', `Bearer ${consultantAToken}`)
+        .send({ status: 'DONE', output: 'Finished despite the past deadline.' });
+      expect(doneRes.status).toBe(200);
       const res = await request(app.getHttpServer()).get(`/tasks/${task.id}`).set('Authorization', `Bearer ${consultantAToken}`);
       expect(res.body.isOverdue).toBe(false);
     });
@@ -465,7 +544,28 @@ describe('Tasks (e2e)', () => {
         .post(`/contracts/${contract.id}/sign`)
         .set('Authorization', `Bearer ${directorToken}`)
         .send({ signedDocumentId: `doc-task-gen-${randomUUID()}` });
-      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${directorToken}`).send({ status: 'ACTIVE' });
+      // Client Acceptance Remediation GAP-002 — activation now requires at least one
+      // received payment; unrelated to this test's own assertion (task generation on
+      // activation), but required for the activation call below to succeed at all.
+      // Payment execution (create/record) is ADMIN_FINANCE's job, not EXECUTIVE_DIRECTOR's
+      // (see database/seeds/seed.ts — director only holds payments:view/export) — use
+      // financeToken for these two calls specifically.
+      const seedPaymentRes = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: 1000, currency: 'USD', dueDate: '2026-12-01' });
+      expect(seedPaymentRes.status).toBe(201);
+      const recordRes = await request(app.getHttpServer())
+        .post(`/payments/${seedPaymentRes.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', randomUUID())
+        .send({ amount: 1000 });
+      expect(recordRes.status).toBe(201);
+      const activateRes = await request(app.getHttpServer())
+        .patch(`/contracts/${contract.id}/status`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ status: 'ACTIVE' });
+      expect(activateRes.status).toBe(200);
       await deactivate(template.id);
 
       const generated = await prisma.task.findFirst({ where: { sourceEntityType: 'Contract', sourceEntityId: contract.id } });

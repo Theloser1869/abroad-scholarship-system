@@ -65,6 +65,24 @@ export class PartnerStudentLinksService {
         throw new NotFoundException({ code: 'APPLICATION_NOT_FOUND', message: `Application ${dto.applicationId} not found for this student.` });
       }
     }
+    // Client Acceptance Remediation GAP-006 (REQ-PARTNER-008) — same "validate against the
+    // real owning table, never trust a client-supplied id blind" pattern as caseId/
+    // applicationId above.
+    if (dto.contractId) {
+      const contract = await this.prisma.contract.findUnique({ where: { id: dto.contractId } });
+      if (!contract || contract.studentId !== dto.studentId) {
+        throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: `Contract ${dto.contractId} not found for this student.` });
+      }
+    }
+    if (dto.scholarshipApplicationId) {
+      const scholarshipApplication = await this.prisma.scholarshipApplication.findUnique({ where: { id: dto.scholarshipApplicationId } });
+      if (!scholarshipApplication || scholarshipApplication.studentId !== dto.studentId) {
+        throw new NotFoundException({
+          code: 'SCHOLARSHIP_APPLICATION_NOT_FOUND',
+          message: `Scholarship application ${dto.scholarshipApplicationId} not found for this student.`,
+        });
+      }
+    }
 
     const existing = await this.prisma.partnerStudentLink.findFirst({
       where: { partnerId, studentId: dto.studentId, caseId: dto.caseId ?? null, applicationId: dto.applicationId ?? null, status: 'ACTIVE' },
@@ -83,6 +101,8 @@ export class PartnerStudentLinksService {
         studentId: dto.studentId,
         caseId: dto.caseId,
         applicationId: dto.applicationId,
+        contractId: dto.contractId,
+        scholarshipApplicationId: dto.scholarshipApplicationId,
         linkType: dto.linkType,
         effectiveDate: dto.effectiveDate ? new Date(dto.effectiveDate) : undefined,
         notes: dto.notes,

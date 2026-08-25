@@ -70,6 +70,19 @@ describe('Assessment + Roadmap (e2e)', () => {
       .send({ userId: consultantAId, role: 'OWNER' });
     expect(res.status).toBe(201);
     consultantCaseIds.push(caseId);
+    // Client Acceptance Remediation GAP-004/GAP-005 — Assessment approval now requires a
+    // complete Student profile (dateOfBirth/target*/scholarshipGoal + an AcademicRecord
+    // with grade+gpa). `createStudentWithCase` (via bare Lead conversion) leaves all of
+    // these unset, so every test in this file that approves an assessment needs them —
+    // completed once here, centrally, rather than repeated at each of the ~10 call sites.
+    await request(app.getHttpServer())
+      .patch(`/students/${studentId}`)
+      .set('Authorization', `Bearer ${directorToken}`)
+      .send({ dateOfBirth: '2008-05-01', targetCountry: 'US', targetMajor: 'Computer Science', targetIntake: 'Fall 2027', scholarshipGoal: 'Full-ride merit scholarship' });
+    await request(app.getHttpServer())
+      .post(`/cases/${caseId}/academic-records`)
+      .set('Authorization', `Bearer ${directorToken}`)
+      .send({ school: 'International School', period: '2026-2027', grade: 'Grade 11', gpa: 3.8 });
     return { studentId, caseId };
   }
 
@@ -78,6 +91,91 @@ describe('Assessment + Roadmap (e2e)', () => {
       await prisma.caseMember.deleteMany({ where: { userId: consultantAId, caseId: { in: consultantCaseIds } } });
     }
     await app.close();
+  });
+
+  /// Client Acceptance Remediation GAP-004/GAP-005 (HIGH) — 04_Student_Profile marks DOB,
+  /// target country/major/intake, scholarship goal, grade, and GPA all "Bắt buộc".
+  /// docs/ASSUMPTIONS.md ASM-90: enforced at Assessment approval, not Student creation.
+  describe('Assessment approval requires a complete Student profile (GAP-004/GAP-005)', () => {
+    async function incompleteCase() {
+      const { studentId, caseId } = await createStudentWithCase(app, salesToken);
+      const memberRes = await request(app.getHttpServer())
+        .post(`/cases/${caseId}/members`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ userId: consultantAId, role: 'OWNER' });
+      expect(memberRes.status).toBe(201);
+      consultantCaseIds.push(caseId);
+      return { studentId, caseId };
+    }
+
+    async function draftToReview(caseId: string) {
+      const createRes = await request(app.getHttpServer()).post(`/cases/${caseId}/assessments`).set('Authorization', `Bearer ${consultantAToken}`).send({});
+      expect(createRes.status).toBe(201);
+      const submitRes = await request(app.getHttpServer()).post(`/assessments/${createRes.body.id}/submit`).set('Authorization', `Bearer ${consultantAToken}`);
+      expect(submitRes.status).toBe(201);
+      return createRes.body.id;
+    }
+
+    it('denies approval with no student fields and no academic record at all (409 STUDENT_PROFILE_INCOMPLETE, lists every missing field)', async () => {
+      const { caseId } = await incompleteCase();
+      const assessmentId = await draftToReview(caseId);
+      const res = await request(app.getHttpServer()).post(`/assessments/${assessmentId}/approve`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('STUDENT_PROFILE_INCOMPLETE');
+      expect(res.body.error.missingFields).toEqual(
+        expect.arrayContaining(['dateOfBirth', 'targetCountry', 'targetMajor', 'targetIntake', 'scholarshipGoal', 'academicRecord (grade + GPA)']),
+      );
+    });
+
+    it('denies approval when Student fields are set but no AcademicRecord has both grade and GPA', async () => {
+      const { studentId, caseId } = await incompleteCase();
+      await request(app.getHttpServer())
+        .patch(`/students/${studentId}`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ dateOfBirth: '2008-01-01', targetCountry: 'UK', targetMajor: 'Economics', targetIntake: 'Fall 2027', scholarshipGoal: 'Partial scholarship' });
+      // Academic record created WITHOUT grade — still incomplete.
+      await request(app.getHttpServer())
+        .post(`/cases/${caseId}/academic-records`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ school: 'Some School', period: '2026-2027', gpa: 3.5 });
+
+      const assessmentId = await draftToReview(caseId);
+      const res = await request(app.getHttpServer()).post(`/assessments/${assessmentId}/approve`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('STUDENT_PROFILE_INCOMPLETE');
+      expect(res.body.error.missingFields).toEqual(['academicRecord (grade + GPA)']);
+    });
+
+    it('allows approval once every required Student field and a grade+GPA academic record are present', async () => {
+      const { studentId, caseId } = await incompleteCase();
+      await request(app.getHttpServer())
+        .patch(`/students/${studentId}`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ dateOfBirth: '2008-01-01', targetCountry: 'CA', targetMajor: 'Biology', targetIntake: 'Fall 2027', scholarshipGoal: 'Need-based aid' });
+      await request(app.getHttpServer())
+        .post(`/cases/${caseId}/academic-records`)
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ school: 'Some School', period: '2026-2027', grade: 'Grade 12', gpa: 3.9 });
+
+      const assessmentId = await draftToReview(caseId);
+      const res = await request(app.getHttpServer()).post(`/assessments/${assessmentId}/approve`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('APPROVED');
+    });
+
+    it('a denied approval attempt is still audited', async () => {
+      const { caseId } = await incompleteCase();
+      const assessmentId = await draftToReview(caseId);
+      const res = await request(app.getHttpServer()).post(`/assessments/${assessmentId}/approve`).set('Authorization', `Bearer ${directorToken}`).send({});
+      expect(res.status).toBe(409);
+
+      const auditRow = await prisma.auditLog.findFirst({
+        where: { action: 'APPROVE', objectType: 'Assessments', objectId: assessmentId },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(auditRow).not.toBeNull();
+      expect(auditRow?.result).toBe('ERROR');
+    });
   });
 
   describe('Assessment — RBAC / cross-case', () => {
@@ -311,7 +409,12 @@ describe('Assessment + Roadmap (e2e)', () => {
       expect(blocked.body.error.unmetTaskIds).toContain(taskRes.body.id);
 
       await request(app.getHttpServer()).patch(`/tasks/${taskRes.body.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'IN_PROGRESS' });
-      await request(app.getHttpServer()).patch(`/tasks/${taskRes.body.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
+      // Client Acceptance Remediation GAP-003 — DONE now requires a non-empty output.
+      const taskDone = await request(app.getHttpServer())
+        .patch(`/tasks/${taskRes.body.id}/status`)
+        .set('Authorization', `Bearer ${consultantAToken}`)
+        .send({ status: 'DONE', output: 'Draft essay v1 submitted for review.' });
+      expect(taskDone.status).toBe(200);
       const nowDone = await request(app.getHttpServer()).patch(`/milestones/${milestone.body.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
       expect(nowDone.status).toBe(200);
 

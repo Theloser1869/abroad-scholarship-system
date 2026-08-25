@@ -17,4 +17,12 @@ export class CaseQueryDto extends ListQueryDto {
   @IsOptional()
   @IsUUID()
   studentId?: string;
+
+  /// Client Acceptance Remediation GAP-007 — the Contract Closure/Liquidation page needs
+  /// "which Case does this Contract belong to" (the rich close() precondition set —
+  /// open tasks/debt/visa/enrollment/pre-departure — lives on Case, not Contract). Same
+  /// scope-filtered pattern as studentId above.
+  @IsOptional()
+  @IsUUID()
+  contractId?: string;
 }

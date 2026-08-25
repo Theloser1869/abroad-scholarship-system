@@ -2038,3 +2038,151 @@ this response shape, and no UI anywhere attempts to render them.
 `redactTaskForPortal`'s source directly) rather than defensively typing them as nullable and
 leaving a reader to wonder whether some role sees them.
 **Affected modules**: `apps/web/lib/portal/types.ts`.
+
+## ASM-87 — Export row cap set to 5000, a documented engineering decision not a customer-specified number (Client Acceptance Remediation, GAP-001)
+
+**Date**: 2026-08-24
+**Context**: `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md` REQ-AUDIT-005/REQ-SEC-007
+(CRITICAL, GAP-001) found every export endpoint (`students.export`, `contracts.export`,
+`payments.export`, `reports.exportCases`) ran an unbounded `findMany` with no row cap,
+directly contradicting the customer's mandatory "Export Control: Hạn chế export hàng loạt"
+(09_Account_Security) and "Không cho export hàng loạt" (07_Audit_Log row6). Neither sheet
+names a specific row-count ceiling, currency unit, or time window — only the qualitative
+requirement that bulk export be restricted.
+**Decision**: Added a single shared constant `EXPORT_ROW_CAP = 5000`
+(`apps/api/src/common/export/export-row-cap.ts`), applied identically to all four export
+endpoints: each query now fetches `EXPORT_ROW_CAP + 1` rows and `enforceExportRowCap` throws
+a 409 `EXPORT_ROW_LIMIT_EXCEEDED` (never a silent truncation) when that's exceeded, so the
+caller must narrow their filter rather than receive an incomplete-but-unlabeled export.
+**Reason**: A specific numeric cap must exist for the control to be enforceable at all, but
+inventing one without a customer-stated number is a business decision, not a discovered
+requirement — 5000 was chosen as a round number comfortably above any plausible single-query
+scope filter result in this system's current data volumes, cheap to raise or lower later
+without a migration. This must be confirmed or adjusted with the client, not treated as
+final.
+**Affected modules**: `apps/api/src/common/export/export-row-cap.ts`,
+`apps/api/src/modules/case-management/students/students.service.ts`,
+`apps/api/src/modules/commercial/contracts/contracts.service.ts`,
+`apps/api/src/modules/commercial/payments/payments.service.ts`,
+`apps/api/src/modules/reporting/reports/reports.service.ts`.
+
+## ASM-88 — Contract SIGNED→ACTIVE payment gate requires "at least one payment received," not full payment (Client Acceptance Remediation, GAP-002 / CONFLICT-001)
+
+**Date**: 2026-08-24
+**Context**: `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md` REQ-CONTRACT-002 (CRITICAL,
+GAP-002) found `ContractsService.updateStatus` allowed SIGNED→ACTIVE with zero payment
+recorded. 11_Quan_ly_hop_dong's status sequence places PAYMENT as its own stage between
+SIGNED and ACTIVE, implying activation should be payment-gated — but the customer sheet
+gives no numeric threshold (full contract value? first installment? any amount at all?),
+and 09_Account_Security/12_Mau_hop_dong say nothing further on the subject either.
+**Decision**: `updateStatus`'s SIGNED→ACTIVE transition now requires at least one `Payment`
+row on the contract with `status` in `PARTIALLY_PAID` or `PAID` (i.e. some money has
+genuinely been received — a `PENDING` installment schedule alone does not satisfy this).
+Full payment is deliberately NOT required. Throws 409 `PAYMENT_REQUIRED_FOR_ACTIVATION`
+when unmet.
+**Reason**: Requiring full payment before service starts would be a materially stricter
+business rule than anything the customer sheet states, and real education-consulting
+contracts commonly start service against a deposit, not a paid-in-full balance — inventing
+a 100% threshold risks blocking legitimate activations the client did intend to allow.
+"At least one payment received" is the minimal reading that still gives the PAYMENT stage
+real enforcement (an all-PENDING schedule no longer silently permits activation). This is
+registered as `CONFLICT-001` in `docs/requirements/CLIENT_REQUIREMENT_CONFLICTS.md` and
+must be confirmed (or replaced with an exact percentage/amount rule) by the client — this
+implementation is not presented as the final word on the threshold.
+**Affected modules**: `apps/api/src/modules/commercial/contracts/contracts.service.ts`.
+
+## ASM-89 — Task.output is required at the DONE transition, not at creation (Client Acceptance Remediation, GAP-003)
+
+**Date**: 2026-08-24
+**Context**: `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md` REQ-TASK-004 (HIGH, GAP-003) found
+`Task.output` nullable and unenforced anywhere, against the customer's unconditional "Mọi
+công việc phải có Owner + Deadline + Output + Status" (sheet00 README row9). 17_Data_Dictionary
+row61 lists Output as `Text`, `Required`, with `Nguồn cập nhật` (update source) = "Owner" — the
+person doing the work fills it in, not whoever creates the task (often a manager/consultant
+assigning work someone else will perform). A brand-new task cannot have a real Output yet by
+definition — nothing has been produced.
+**Decision**: `CreateTaskDto` still has no `output` field (a task is created without one, same
+as before). `TasksService.applyStatusTransition`'s DONE branch now requires a non-empty
+`output` (freshly supplied in the same call, or already on the record) before allowing the
+transition — exactly mirroring the pre-existing BLOCKED/`blocker` precondition immediately
+below it in the same method. A task can therefore reach DONE only after real output exists,
+enforced server-side, matching what the Data Dictionary's "Owner updates it" phrasing implies
+about *when* in the lifecycle it gets filled in.
+**Reason**: The Data Dictionary's own "update source: Owner" annotation is the strongest
+available signal for *when* Output is meant to be populated (during/after the work, not at
+task definition time) — inventing a create-time-required Output field would contradict that
+signal and would be operationally nonsensical (no one can state a task's output before doing
+it). This was judged specific enough not to warrant a formal CONFLICT entry; it mirrors an
+existing, already-accepted pattern in the same codebase (BLOCKED/blocker) rather than
+introducing a new one.
+**Affected modules**: `apps/api/src/modules/case-management/tasks/tasks.service.ts`.
+
+## ASM-90 — Student/AcademicRecord mandatory fields (DOB, target*, scholarship goal, grade, GPA) enforced at Assessment approval, not at creation or as DB NOT NULL (Client Acceptance Remediation, GAP-004/GAP-005)
+
+**Date**: 2026-08-24
+**Context**: `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md` REQ-STUDENT-002/004 (HIGH,
+GAP-004/GAP-005) found `Student.dateOfBirth`/`targetCountry`/`targetMajor`/`targetIntake`
+optional in the schema, `scholarship_goal` absent entirely, and `school`/`grade`/`gpa`
+absent as direct Student fields (they live on the Case-scoped `AcademicRecord` — see the
+existing normalization already documented for `REQ-STUDENT-002`/`REQ-STUDENT-003`) —
+against the customer's 04_Student_Profile sheet marking all of these "Bắt buộc".
+**Decision**: Added `Student.scholarshipGoal` and `AcademicRecord.grade` as new nullable
+columns (migration `20260824150934_student_academic_record_client_acceptance_fields`,
+purely additive). Rather than a DB `NOT NULL` constraint or a create-time-required DTO
+field, `AssessmentsService.approve()` now calls `assertStudentProfileComplete(caseId)`,
+which throws 409 `STUDENT_PROFILE_INCOMPLETE` (listing exactly which fields are missing)
+unless the Student has `dateOfBirth`/`targetCountry`/`targetMajor`/`targetIntake`/
+`scholarshipGoal` all set AND the Case has at least one `AcademicRecord` with both `grade`
+and `gpa` set.
+**Reason**: A bare Student record is routinely created by Sales/HCTH at contract-signing
+time, before any consultant has gathered target-country/major/GPA/DOB — requiring these at
+creation would either block that legitimate early step or force fabricated placeholder
+values into real records, which is worse than not enforcing at all. Assessment approval
+(sheet08 stage 3, "Đánh giá năng lực và gap") is the customer's own named checkpoint where a
+baseline profile is meant to be confirmed, and is already the exact precondition Roadmap
+approval depends on transitively — gating there gives the requirement real enforcement
+teeth without inventing a new checkpoint or breaking the existing "Student created early,
+profile filled in during counseling" flow. This is a stage-aware interpretation, not a
+literal implementation of "Bắt buộc" as a column constraint; if the client specifically
+wants these fields blocked at Student creation/edit instead, that is a straightforward
+follow-up change to `CreateStudentDto`/`UpdateStudentDto`.
+**Affected modules**: `database/schema.prisma`,
+`apps/api/src/modules/counseling/assessments/assessments.service.ts`,
+`apps/api/src/modules/case-management/students/{dto/create-student.dto.ts,students.service.ts}`,
+`apps/api/src/modules/counseling/profile-evidence/{dto/create-academic-record.dto.ts,academic-records.service.ts}`.
+
+## ASM-91 — Contract/Scholarship traceability added as real FKs, alongside (not replacing) the existing sourceType/sourceId polymorphic pair (Client Acceptance Remediation, GAP-006)
+
+**Date**: 2026-08-25
+**Context**: `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md` REQ-PARTNER-008 (HIGH, GAP-006)
+found neither `CommissionTransaction` nor `PartnerStudentLink` carried a direct `contractId`
+(or `scholarshipId`), against 16_Contract_Partner_Link's one-row link view (Student/
+Contract/Partner/Program/Application/Scholarship/Visa). Investigation found
+`CommissionTransaction` already had a working polymorphic `sourceType`/`sourceId` pair
+(`'Contract'` or `'Payment'`, ASM-44) that correctly resolves back to a Contract — but only
+via a manual `WHERE sourceType='Contract' AND sourceId=X` query, not a real FK/relation, and
+not populated at all when the source is a Payment (Contract only reachable one hop further
+via `Payment.contractId`).
+**Decision**: Added `CommissionTransaction.contractId` (real FK to Contract, auto-resolved
+at `create()` time from whichever source base was actually used — direct for
+`sourceType='Contract'`, one hop via `Payment.contractId` for `sourceType='Payment'`) and
+`PartnerStudentLink.contractId`/`scholarshipApplicationId` (real FKs, optional, validated
+against the referenced Contract/ScholarshipApplication's own `studentId` — same pattern
+already used for `caseId`/`applicationId` on that table). The existing `sourceType`/
+`sourceId` mechanism is unchanged, not replaced — this is additive.
+**Reason**: A dedicated FK column is directly joinable/queryable (`WHERE contractId = X`,
+`include: { contract: true }`) in a way a polymorphic string pair never is, and is the more
+literal reading of the customer sheet's "Contract ID" column. Keeping `sourceType`/
+`sourceId` alongside it (rather than migrating away from it) avoids an unnecessary breaking
+change to CommissionTransaction's existing, already-tested calculation logic, which reads
+the live amount from whichever base type the transaction actually names.
+**Scope note — NOT fully closed**: 16_Contract_Partner_Link also lists Visa as a column of
+the same link view. This phase added Contract and Scholarship traceability only; a direct
+`PartnerStudentLink.visaId` FK was deliberately deferred (not attempted) to avoid a further
+schema/service change while the final regression suite for this remediation phase was
+already running — see `docs/requirements/CLIENT_REQUIREMENTS_GAPS.md` GAP-006 and
+`docs/requirements/CLIENT_ACCEPTANCE_REMEDIATION_REPORT.md` for the honest disclosure of
+this residual gap. Do not report GAP-006 as fully closed without it.
+**Affected modules**: `database/schema.prisma`,
+`apps/api/src/modules/partners/commission-transactions/commission-transactions.service.ts`,
+`apps/api/src/modules/partners/partner-student-links/{dto/create-partner-student-link.dto.ts,partner-student-links.service.ts}`.

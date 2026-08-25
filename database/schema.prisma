@@ -495,27 +495,33 @@ model Lead {
 /// HS-YYYY-NNNNN (SRS section 8, resolved per section 14 note — see ASM/ARCH-DEC history
 /// in docs/ASSUMPTIONS.md and docs/architecture/DECISIONS.md).
 model Student {
-  id             String    @id @default(uuid())
-  studentCode    String    @unique @map("student_code")
-  fullName       String    @map("full_name")
-  dateOfBirth    DateTime? @map("date_of_birth")
-  email          String?
-  phone          String?
-  targetCountry  String?   @map("target_country")
-  targetMajor    String?   @map("target_major")
-  targetIntake   String?   @map("target_intake")
-  budget         Decimal?  @db.Decimal(14, 2)
-  budgetCurrency String?   @map("budget_currency") @db.Char(3)
-  archivedAt     DateTime? @map("archived_at")
+  id              String    @id @default(uuid())
+  studentCode     String    @unique @map("student_code")
+  fullName        String    @map("full_name")
+  dateOfBirth     DateTime? @map("date_of_birth")
+  email           String?
+  phone           String?
+  targetCountry   String?   @map("target_country")
+  targetMajor     String?   @map("target_major")
+  targetIntake    String?   @map("target_intake")
+  /// Client Acceptance Remediation GAP-005 (REQ-STUDENT-004) — 04_Student_Profile row18
+  /// "Mục tiêu học bổng | Scholarship target | ... | Bắt buộc". Nullable at the schema
+  /// level (same as targetCountry/targetMajor/targetIntake above) — required-ness is
+  /// enforced stage-aware, at Assessment approval, not as a DB NOT NULL constraint. See
+  /// AssessmentsService.assertStudentProfileComplete.
+  scholarshipGoal String?   @map("scholarship_goal")
+  budget          Decimal?  @db.Decimal(14, 2)
+  budgetCurrency  String?   @map("budget_currency") @db.Char(3)
+  archivedAt      DateTime? @map("archived_at")
   /// SRS role table "HS/PHHS: Chính tài khoản của mình" + 03-security/02_RBAC.md scope
   /// "Student self". Nullable — most Student rows have no portal account (staff-entered,
   /// no login yet). Added in Phase 03 because RBAC "Student self" scope is impossible to
   /// enforce without a concrete link from a User to the Student they represent — see
   /// docs/ASSUMPTIONS.md ASM-05.
-  portalUserId   String?   @unique @map("portal_user_id")
-  portalUser     User?     @relation("StudentPortalUser", fields: [portalUserId], references: [id])
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  portalUserId    String?   @unique @map("portal_user_id")
+  portalUser      User?     @relation("StudentPortalUser", fields: [portalUserId], references: [id])
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   /// Plural — see the comment on Lead.convertedStudentId: more than one Lead can resolve
   /// to this Student via the merge flow (04-core-crm/01_LEAD.md).
@@ -978,6 +984,11 @@ model AcademicRecord {
   /// Free text (e.g. "Grade 11, 2024–2025", "Fall 2024") — school terms/calendars vary too
   /// widely for a fixed enum, same "configurable, not hard-coded" precedent as `Case.stage`.
   period             String
+  /// Client Acceptance Remediation GAP-004 (REQ-STUDENT-002) — 04_Student_Profile row5
+  /// "Trường/Lớp | Thông tin học tập hiện tại | ... | Bắt buộc" names Grade as its own
+  /// field distinct from `period`'s free-text term/year. Nullable at the schema level;
+  /// required-ness enforced stage-aware — see AssessmentsService.assertStudentProfileComplete.
+  grade              String?
   gpa                Decimal?  @db.Decimal(5, 2)
   gradingScale       String?   @map("grading_scale")
   evidenceDocumentId String?   @map("evidence_document_id")
@@ -1591,6 +1602,10 @@ model ScholarshipApplication {
   createdAt                  DateTime                     @default(now()) @map("created_at")
   updatedAt                  DateTime                     @updatedAt @map("updated_at")
 
+  /// Client Acceptance Remediation GAP-006 — back-relation for the new
+  /// PartnerStudentLink.scholarshipApplicationId FK above.
+  partnerStudentLinks PartnerStudentLink[]
+
   @@index([studentId])
   @@index([caseId])
   @@index([scholarshipMasterId])
@@ -1935,13 +1950,23 @@ model Contract {
   completedAt       DateTime?         @map("completed_at")
   liquidatedAt      DateTime?         @map("liquidated_at")
   archivedAt        DateTime?         @map("archived_at")
+  /// Client Acceptance Remediation GAP-007 (REQ-CASE-014) — 11_Quan_ly_hop_dong row12
+  /// "Thanh lý | Tạo biên bản thanh lý | Ngày thanh lý, xác nhận hai bên". `liquidatedAt`
+  /// above is the date; this is the liquidation record's reason/confirmation text —
+  /// required by ContractsService.updateStatus when transitioning to LIQUIDATED (same
+  /// "closureReason" naming as Case.closureReason for the analogous concept).
+  closureReason     String?           @map("closure_reason")
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
 
-  amendments  ContractAmendment[]
-  payments    Payment[]
-  reviewLinks ContractReviewLink[]
-  case        Case?
+  amendments             ContractAmendment[]
+  payments               Payment[]
+  reviewLinks            ContractReviewLink[]
+  case                   Case?
+  /// Client Acceptance Remediation GAP-006 — back-relations for the new
+  /// PartnerStudentLink.contractId/CommissionTransaction.contractId FKs above.
+  partnerStudentLinks    PartnerStudentLink[]
+  commissionTransactions CommissionTransaction[]
 
   @@index([studentId])
   @@index([status])
@@ -2146,29 +2171,39 @@ model PartnerDocument {
 /// 00-context/00_MASTER_CONTEXT.md's ID table — plain UUID, same "sub-record, no format
 /// needed" precedent as VisaChecklistItem/Enrollment (ASM-26/34).
 model PartnerStudentLink {
-  id            String            @id @default(uuid())
-  partnerId     String            @map("partner_id")
-  partner       Partner           @relation(fields: [partnerId], references: [id])
-  studentId     String            @map("student_id")
-  student       Student           @relation(fields: [studentId], references: [id])
-  caseId        String?           @map("case_id")
-  case          Case?             @relation(fields: [caseId], references: [id])
-  applicationId String?           @map("application_id")
-  application   Application?      @relation(fields: [applicationId], references: [id])
+  id                       String                  @id @default(uuid())
+  partnerId                String                  @map("partner_id")
+  partner                  Partner                 @relation(fields: [partnerId], references: [id])
+  studentId                String                  @map("student_id")
+  student                  Student                 @relation(fields: [studentId], references: [id])
+  caseId                   String?                 @map("case_id")
+  case                     Case?                   @relation(fields: [caseId], references: [id])
+  applicationId            String?                 @map("application_id")
+  application              Application?            @relation(fields: [applicationId], references: [id])
+  /// Client Acceptance Remediation GAP-006 (HIGH, REQ-PARTNER-008) — 16_Contract_Partner_Link
+  /// names Contract ID and Scholarship as columns of the same one-row link view this table
+  /// already provides for Student/Partner/Case/Application. Both nullable and optional —
+  /// not every link traces to a signed contract or a scholarship application.
+  contractId               String?                 @map("contract_id")
+  contract                 Contract?               @relation(fields: [contractId], references: [id])
+  scholarshipApplicationId String?                 @map("scholarship_application_id")
+  scholarshipApplication   ScholarshipApplication? @relation(fields: [scholarshipApplicationId], references: [id])
   /// Free text (Referral/Agent/Sponsor/...) — configurable, never a hard-coded enum, same
   /// precedent as `Visa.visaType`/`Offer.offerType`.
-  linkType      String            @map("link_type")
-  status        PartnerLinkStatus @default(ACTIVE)
-  effectiveDate DateTime?         @map("effective_date")
-  endDate       DateTime?         @map("end_date")
-  notes         String?
-  createdById   String?           @map("created_by_id")
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
+  linkType                 String                  @map("link_type")
+  status                   PartnerLinkStatus       @default(ACTIVE)
+  effectiveDate            DateTime?               @map("effective_date")
+  endDate                  DateTime?               @map("end_date")
+  notes                    String?
+  createdById              String?                 @map("created_by_id")
+  createdAt                DateTime                @default(now()) @map("created_at")
+  updatedAt                DateTime                @updatedAt @map("updated_at")
 
   @@index([partnerId])
   @@index([studentId])
   @@index([caseId])
+  @@index([contractId])
+  @@index([scholarshipApplicationId])
   @@map("partner_student_links")
 }
 
@@ -2236,6 +2271,13 @@ model CommissionTransaction {
   case             Case?                       @relation(fields: [caseId], references: [id])
   applicationId    String?                     @map("application_id")
   application      Application?                @relation(fields: [applicationId], references: [id])
+  /// Client Acceptance Remediation GAP-006 (HIGH, REQ-PARTNER-008) — 16_Contract_Partner_Link
+  /// wants "which Contract earned this commission" as a directly joinable column. A real
+  /// FK (not another polymorphic pair) — auto-resolved and set once at create() time from
+  /// whichever of sourceType='Contract'/'Payment' this transaction actually uses, so it
+  /// stays queryable even when the source is a Payment (Payment.contractId one hop away).
+  contractId       String?                     @map("contract_id")
+  contract         Contract?                   @relation(fields: [contractId], references: [id])
   sourceType       String                      @map("source_type")
   sourceId         String?                     @map("source_id")
   basis            CommissionBasis?
@@ -2253,6 +2295,7 @@ model CommissionTransaction {
   @@index([partnerId])
   @@index([status])
   @@index([sourceType, sourceId])
+  @@index([contractId])
   @@map("commission_transactions")
 }
 

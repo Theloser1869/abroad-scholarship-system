@@ -72,6 +72,7 @@ export class CasesService {
       ...this.scope.caseListFilter(principal),
       ...(query.status ? { status: query.status } : {}),
       ...(query.studentId ? { studentId: query.studentId } : {}),
+      ...(query.contractId ? { contractId: query.contractId } : {}),
     };
 
     const [data, totalItems] = await this.prisma.$transaction([

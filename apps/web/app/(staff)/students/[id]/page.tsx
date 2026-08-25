@@ -159,6 +159,14 @@ export function StudentDetailContent({ id }: { id: string }) {
               </dd>
             </div>
             <div className="flex justify-between">
+              <dt className="text-muted-foreground">Kỳ nhập học mục tiêu</dt>
+              <dd>{student.targetIntake ?? "—"}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-muted-foreground">Mục tiêu học bổng</dt>
+              <dd>{student.scholarshipGoal ?? "—"}</dd>
+            </div>
+            <div className="flex justify-between">
               <dt className="text-muted-foreground">Ngân sách</dt>
               {/* budget/budgetCurrency come back `null` when redacted for this role
                  (FieldPolicyService) — rendered exactly as returned, never a client

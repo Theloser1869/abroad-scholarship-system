@@ -12,11 +12,13 @@ import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import type { CreatePartnerStudentLinkInput } from "@/lib/partner-student-links/types";
 
 /// Create a PartnerStudentLink (F06 instruction §20) — a pure junction row, never inferred
-/// from Student/Partner names. `caseId`/`applicationId` are manual UUID inputs (optional,
-/// narrowing scope) since no case/application picker scoped to an arbitrary Student exists
-/// yet — same "manual UUID for a narrow, optional linkage field" precedent as F04/F05
-/// evidence fields. Editing is limited to `linkType`/`effectiveDate`/`notes` only — identity
-/// fields are locked after creation (propose a new link instead of re-pointing one).
+/// from Student/Partner names. `caseId`/`applicationId`/`contractId`/`scholarshipApplicationId`
+/// (the last two added for Client Acceptance Remediation GAP-006) are manual UUID inputs
+/// (optional, narrowing scope) since no case/application/contract/scholarship picker scoped
+/// to an arbitrary Student exists yet — same "manual UUID for a narrow, optional linkage
+/// field" precedent as F04/F05 evidence fields. Editing is limited to
+/// `linkType`/`effectiveDate`/`notes` only — identity fields are locked after creation
+/// (propose a new link instead of re-pointing one).
 export function PartnerStudentLinkFormDialog({
   open,
   onClose,
@@ -31,6 +33,8 @@ export function PartnerStudentLinkFormDialog({
   const [studentId, setStudentId] = useState("");
   const [caseId, setCaseId] = useState("");
   const [applicationId, setApplicationId] = useState("");
+  const [contractId, setContractId] = useState("");
+  const [scholarshipApplicationId, setScholarshipApplicationId] = useState("");
   const [linkType, setLinkType] = useState("");
   const [effectiveDate, setEffectiveDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -41,6 +45,8 @@ export function PartnerStudentLinkFormDialog({
     setStudentId("");
     setCaseId("");
     setApplicationId("");
+    setContractId("");
+    setScholarshipApplicationId("");
     setLinkType("");
     setEffectiveDate("");
     setNotes("");
@@ -59,6 +65,8 @@ export function PartnerStudentLinkFormDialog({
         studentId: studentId.trim(),
         caseId: caseId.trim() || undefined,
         applicationId: applicationId.trim() || undefined,
+        contractId: contractId.trim() || undefined,
+        scholarshipApplicationId: scholarshipApplicationId.trim() || undefined,
         linkType: linkType.trim(),
         effectiveDate: effectiveDate || undefined,
         notes: notes.trim() || undefined,
@@ -92,6 +100,25 @@ export function PartnerStudentLinkFormDialog({
               Application ID (tùy chọn)
             </label>
             <Input id="partner-link-application" value={applicationId} onChange={(e) => setApplicationId(e.target.value)} placeholder="UUID hồ sơ ứng tuyển" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="partner-link-contract" className="mb-1 block text-sm font-medium">
+              Contract ID (tùy chọn)
+            </label>
+            <Input id="partner-link-contract" value={contractId} onChange={(e) => setContractId(e.target.value)} placeholder="UUID hợp đồng" />
+          </div>
+          <div>
+            <label htmlFor="partner-link-scholarship" className="mb-1 block text-sm font-medium">
+              Scholarship Application ID (tùy chọn)
+            </label>
+            <Input
+              id="partner-link-scholarship"
+              value={scholarshipApplicationId}
+              onChange={(e) => setScholarshipApplicationId(e.target.value)}
+              placeholder="UUID hồ sơ học bổng"
+            />
           </div>
         </div>
         <div>

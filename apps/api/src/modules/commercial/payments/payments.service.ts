@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { Payment, PaymentStatus, Prisma } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult, parseSort } from '../../../common/dto/list-query.dto';
+import { EXPORT_ROW_CAP, enforceExportRowCap } from '../../../common/export/export-row-cap';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ScopePolicyService } from '../../identity/rbac/scope-policy.service';
@@ -271,7 +272,12 @@ export class PaymentsService {
   async export(principal: Principal): Promise<{ rows: PaymentWithComputed[]; rowCount: number }> {
     const contractWhere = this.scope.contractListFilter(principal);
     await this.syncOverdueStatus({ contract: contractWhere });
-    const rows = await this.prisma.payment.findMany({ where: { contract: contractWhere }, orderBy: { dueDate: 'desc' } });
+    const rows = await this.prisma.payment.findMany({
+      where: { contract: contractWhere },
+      orderBy: { dueDate: 'desc' },
+      take: EXPORT_ROW_CAP + 1,
+    });
+    enforceExportRowCap(rows, 'payments in your scope');
     return { rows: rows.map((r) => this.withComputed(r)), rowCount: rows.length };
   }
 

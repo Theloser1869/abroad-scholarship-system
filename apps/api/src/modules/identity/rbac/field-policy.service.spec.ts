@@ -11,6 +11,7 @@ const BASE_STUDENT = {
   targetCountry: null,
   targetMajor: null,
   targetIntake: null,
+  scholarshipGoal: null,
   budget: 50000 as never,
   budgetCurrency: 'USD',
   archivedAt: null,
@@ -41,6 +42,7 @@ const BASE_CONTRACT = {
   completedAt: null,
   liquidatedAt: null,
   archivedAt: null,
+  closureReason: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 } satisfies Contract;

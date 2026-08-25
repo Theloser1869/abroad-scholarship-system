@@ -337,6 +337,35 @@ describe('Partners + Commission (e2e)', () => {
       expect(res.body.error.code).toBe('CASE_NOT_FOUND');
     });
 
+    /// Client Acceptance Remediation GAP-006 (HIGH, REQ-PARTNER-008) — same
+    /// validate-against-the-real-owning-table pattern as caseId/applicationId above.
+    describe('contractId (GAP-006)', () => {
+      it('creates a link with a real contractId belonging to the same student', async () => {
+        const { studentId } = await createCaseForConsultant();
+        const partner = await createPartner();
+        const { contractId } = await createSignedContractWithPayment(studentId);
+
+        const res = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/student-links`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ studentId, contractId, linkType: 'Referral' });
+        expect(res.status).toBe(201);
+        expect(res.body.contractId).toBe(contractId);
+      });
+
+      it('a Contract belonging to a different student is rejected 404 — never mismatched FKs', async () => {
+        const { studentId: otherStudentId } = await createCaseForConsultant();
+        const { contractId: otherStudentsContractId } = await createSignedContractWithPayment(otherStudentId);
+        const partner = await createPartner();
+        const res = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/student-links`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ studentId: studentAId, contractId: otherStudentsContractId, linkType: 'Referral' });
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('CONTRACT_NOT_FOUND');
+      });
+    });
+
     it('archiving frees the (partner, student, case) combination for a new link', async () => {
       const { studentId, caseId } = await createCaseForConsultant();
       const partner = await createPartner();
@@ -801,6 +830,70 @@ describe('Partners + Commission (e2e)', () => {
       });
       expect(auditRow).not.toBeNull();
       expect(auditRow?.result).toBe('SUCCESS');
+    });
+
+    /// Client Acceptance Remediation GAP-006 (HIGH, REQ-PARTNER-008) —
+    /// 16_Contract_Partner_Link wants "which Contract earned this commission" directly
+    /// joinable. `contractId` is auto-resolved at create() time regardless of which base
+    /// (`sourceType`) the transaction actually uses.
+    describe('contractId traceability (GAP-006)', () => {
+      it('is set directly from the Contract when sourceType is Contract', async () => {
+        const partner = await createPartner();
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-rules`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ basis: 'FIXED', currency: 'USD', fixedAmount: 5 });
+        const { studentId } = await createCaseForConsultant();
+        await linkPartnerToStudent(partner.id, studentId);
+        const { contractId } = await createSignedContractWithPayment(studentId);
+
+        const create = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-transactions`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .send({ sourceType: 'Contract', sourceId: contractId });
+        expect(create.status).toBe(201);
+        expect(create.body.contractId).toBe(contractId);
+
+        const persisted = await prisma.commissionTransaction.findUniqueOrThrow({ where: { id: create.body.id } });
+        expect(persisted.contractId).toBe(contractId);
+      });
+
+      it('is resolved one hop via Payment.contractId when sourceType is Payment', async () => {
+        const partner = await createPartner();
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-rules`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ basis: 'FIXED', currency: 'USD', fixedAmount: 5 });
+        const { studentId } = await createCaseForConsultant();
+        await linkPartnerToStudent(partner.id, studentId);
+        const { contractId, paymentId } = await createSignedContractWithPayment(studentId);
+
+        const create = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-transactions`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .send({ sourceType: 'Payment', sourceId: paymentId });
+        expect(create.status).toBe(201);
+        expect(create.body.contractId).toBe(contractId);
+      });
+
+      it('every CommissionTransaction sourced from this Contract is now directly queryable via commissionTransaction.findMany({ where: { contractId } })', async () => {
+        const partner = await createPartner();
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-rules`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ basis: 'FIXED', currency: 'USD', fixedAmount: 5 });
+        const { studentId } = await createCaseForConsultant();
+        await linkPartnerToStudent(partner.id, studentId);
+        const { contractId } = await createSignedContractWithPayment(studentId);
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-transactions`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .send({ sourceType: 'Contract', sourceId: contractId });
+
+        const forThisContract = await prisma.commissionTransaction.findMany({ where: { contractId } });
+        expect(forThisContract.length).toBeGreaterThanOrEqual(1);
+        expect(forThisContract.every((t) => t.partnerId === partner.id)).toBe(true);
+      });
     });
   });
 });

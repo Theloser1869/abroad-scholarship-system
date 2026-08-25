@@ -27,6 +27,9 @@ export interface PartnerStudentLink {
   student: PartnerStudentLinkStudentSummary;
   caseId: string | null;
   applicationId: string | null;
+  /** Client Acceptance Remediation GAP-006 — direct FKs, validated against the referenced Contract/ScholarshipApplication's own studentId. */
+  contractId: string | null;
+  scholarshipApplicationId: string | null;
   linkType: string;
   status: PartnerLinkStatus;
   effectiveDate: string | null;
@@ -49,6 +52,8 @@ export interface CreatePartnerStudentLinkInput {
   studentId: string;
   caseId?: string;
   applicationId?: string;
+  contractId?: string;
+  scholarshipApplicationId?: string;
   linkType: string;
   effectiveDate?: string;
   notes?: string;

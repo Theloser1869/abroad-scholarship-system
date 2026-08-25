@@ -142,9 +142,21 @@ describe('Payments (e2e)', () => {
     // Contract already LIQUIDATED/ARCHIVED ("financial activity on a closed-out record").
     it('rejects creating an installment against a LIQUIDATED contract (409)', async () => {
       const contract = await signedContract();
+      // Client Acceptance Remediation GAP-002 — activation now requires at least one
+      // received payment; this seed payment exists only to satisfy that gate, unrelated to
+      // what this test actually asserts (creating a NEW installment post-LIQUIDATED).
+      const activationSeedPayment = await createInstallment(contract.id, { installmentNo: 1, amount: 500 });
+      await request(app.getHttpServer())
+        .post(`/payments/${activationSeedPayment.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', randomUUID())
+        .send({ amount: 500 });
       await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
       await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
-      const liquidated = await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'LIQUIDATED' });
+      const liquidated = await request(app.getHttpServer())
+        .patch(`/contracts/${contract.id}/status`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ status: 'LIQUIDATED', reason: 'Service delivered in full; final handover completed.' });
       expect(liquidated.body.status).toBe('LIQUIDATED');
 
       const res = await request(app.getHttpServer())
@@ -158,10 +170,46 @@ describe('Payments (e2e)', () => {
     it('rejects recording a payment against a LIQUIDATED contract (409), but refund/waive remain reachable on already-existing payments', async () => {
       const contract = await signedContract();
       const payment = await createInstallment(contract.id, { installmentNo: 1, amount: 1000 });
+      // Client Acceptance Remediation GAP-002 — activation now requires at least one
+      // received payment; a partial payment satisfies that.
+      await request(app.getHttpServer())
+        .post(`/payments/${payment.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', randomUUID())
+        .send({ amount: 200 });
       await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
-      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
-      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'LIQUIDATED' });
 
+      // Client Acceptance Remediation GAP-007 — ACTIVE -> COMPLETED now requires no
+      // unresolved (PENDING/PARTIALLY_PAID/OVERDUE) payment; this installment is still
+      // PARTIALLY_PAID (800 outstanding), so completion correctly fails here first.
+      const tooEarly = await request(app.getHttpServer())
+        .patch(`/contracts/${contract.id}/status`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ status: 'COMPLETED' });
+      expect(tooEarly.status).toBe(409);
+      expect(tooEarly.body.error.code).toBe('OUTSTANDING_DEBT_REMAINS');
+
+      // Waiving the remaining balance is itself a legitimate way to resolve outstanding
+      // debt before closure (see PaymentsService.waive's own comment) — not just paying it.
+      const earlyWaiveRes = await request(app.getHttpServer())
+        .post(`/payments/${payment.id}/waive`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ reason: 'Remaining balance forgiven as a goodwill gesture.' });
+      expect(earlyWaiveRes.status).toBe(201);
+      expect(earlyWaiveRes.body.status).toBe('WAIVED');
+
+      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+      await request(app.getHttpServer())
+        .patch(`/contracts/${contract.id}/status`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ status: 'LIQUIDATED', reason: 'Service delivered in full; final handover completed.' });
+
+      // The payment is now WAIVED (already resolved) — recording more against it hits
+      // PAYMENT_ALREADY_RESOLVED before the contract-status check is ever reached. To still
+      // verify the CONTRACT_CLOSED guard itself (defense-in-depth against a payment somehow
+      // left unresolved on a closed contract — e.g. legacy data), synthesize that otherwise
+      // API-unreachable state directly via Prisma rather than skipping the check untested.
+      await prisma.payment.update({ where: { id: payment.id }, data: { status: 'PENDING', paidAmount: 0, waivedAt: null, waivedById: null, waivedReason: null } });
       const recordRes = await request(app.getHttpServer())
         .post(`/payments/${payment.id}/record`)
         .set('Authorization', `Bearer ${financeToken}`)

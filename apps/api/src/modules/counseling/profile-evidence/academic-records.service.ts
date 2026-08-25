@@ -33,7 +33,7 @@ export class AcademicRecordsService {
   async create(principal: Principal, caseId: string, dto: CreateAcademicRecordDto): Promise<AcademicRecord> {
     await this.scope.assertCaseAccessible(principal, caseId);
     const record = await this.prisma.academicRecord.create({
-      data: { caseId, school: dto.school, period: dto.period, gpa: dto.gpa, gradingScale: dto.gradingScale, evidenceDocumentId: dto.evidenceDocumentId },
+      data: { caseId, school: dto.school, period: dto.period, grade: dto.grade, gpa: dto.gpa, gradingScale: dto.gradingScale, evidenceDocumentId: dto.evidenceDocumentId },
     });
     if (dto.evidenceDocumentId) await this.documents.grantCaseAccess(dto.evidenceDocumentId, caseId);
     return record;
@@ -44,7 +44,7 @@ export class AcademicRecordsService {
     await this.scope.assertCaseAccessible(principal, record.caseId);
     const updated = await this.prisma.academicRecord.update({
       where: { id },
-      data: { school: dto.school, period: dto.period, gpa: dto.gpa, gradingScale: dto.gradingScale, evidenceDocumentId: dto.evidenceDocumentId },
+      data: { school: dto.school, period: dto.period, grade: dto.grade, gpa: dto.gpa, gradingScale: dto.gradingScale, evidenceDocumentId: dto.evidenceDocumentId },
     });
     if (dto.evidenceDocumentId) await this.documents.grantCaseAccess(dto.evidenceDocumentId, record.caseId);
     return updated;

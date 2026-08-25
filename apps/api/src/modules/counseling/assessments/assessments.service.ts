@@ -70,6 +70,7 @@ export class AssessmentsService {
 
   async approve(principal: Principal, id: string, dto: ApproveAssessmentDto): Promise<Assessment> {
     const assessment = await this.requireStatus(principal, id, ['REVIEW']);
+    await this.assertStudentProfileComplete(assessment.caseId);
     const [, updated] = await this.prisma.$transaction([
       this.prisma.approval.create({ data: { entityType: 'Assessment', entityId: id, approverId: principal.userId, decision: 'APPROVED', reason: dto.reason, decidedAt: new Date() } }),
       this.prisma.assessment.update({ where: { id: assessment.id }, data: { status: 'APPROVED', approvedById: principal.userId, approvedAt: new Date() } }),
@@ -126,5 +127,36 @@ export class AssessmentsService {
       });
     }
     return assessment;
+  }
+
+  /// Client Acceptance Remediation GAP-004/GAP-005 (HIGH) — 04_Student_Profile marks DOB,
+  /// school, grade, GPA, target country/major/intake, and scholarship goal all "Bắt buộc".
+  /// None of these can reasonably be required at Student-creation time (staff routinely
+  /// opens a bare Student record before counseling has gathered target-country/major/GPA
+  /// — see docs/ASSUMPTIONS.md ASM-90 for why this is enforced stage-aware here, at
+  /// Assessment approval, rather than as a DB NOT NULL constraint on Student/AcademicRecord).
+  private async assertStudentProfileComplete(caseId: string): Promise<void> {
+    const caseRecord = await this.prisma.case.findUniqueOrThrow({ where: { id: caseId }, select: { studentId: true } });
+    const student = await this.prisma.student.findUniqueOrThrow({ where: { id: caseRecord.studentId } });
+
+    const missing: string[] = [];
+    if (!student.dateOfBirth) missing.push('dateOfBirth');
+    if (!student.targetCountry) missing.push('targetCountry');
+    if (!student.targetMajor) missing.push('targetMajor');
+    if (!student.targetIntake) missing.push('targetIntake');
+    if (!student.scholarshipGoal) missing.push('scholarshipGoal');
+
+    const academicRecord = await this.prisma.academicRecord.findFirst({
+      where: { caseId, gpa: { not: null }, grade: { not: null } },
+    });
+    if (!academicRecord) missing.push('academicRecord (grade + GPA)');
+
+    if (missing.length > 0) {
+      throw new ConflictException({
+        code: 'STUDENT_PROFILE_INCOMPLETE',
+        message: `The student's profile is missing required fields before this assessment can be approved: ${missing.join(', ')}.`,
+        missingFields: missing,
+      });
+    }
   }
 }

@@ -125,7 +125,7 @@ function AcademicRow({ record: r, caseId, canEdit, onEdit }: { record: AcademicR
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="font-medium">
-            {r.school} · {r.period}
+            {r.school} · {r.period} {r.grade ? `· ${r.grade}` : ""}
           </p>
           <p className="text-xs text-muted-foreground">
             GPA: {r.gpa ?? "—"} {r.gradingScale ? `(${r.gradingScale})` : ""} {r.verifiedAt ? "· Đã xác minh" : ""}

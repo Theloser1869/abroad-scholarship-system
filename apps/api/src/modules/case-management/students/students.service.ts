@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Student } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult, parseSort } from '../../../common/dto/list-query.dto';
+import { EXPORT_ROW_CAP, enforceExportRowCap } from '../../../common/export/export-row-cap';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ScopePolicyService } from '../../identity/rbac/scope-policy.service';
@@ -89,6 +90,7 @@ export class StudentsService {
         targetCountry: dto.targetCountry?.toUpperCase(),
         targetMajor: dto.targetMajor,
         targetIntake: dto.targetIntake,
+        scholarshipGoal: dto.scholarshipGoal,
         budget: dto.budget,
         budgetCurrency: dto.budgetCurrency,
       },
@@ -107,6 +109,7 @@ export class StudentsService {
         targetCountry: dto.targetCountry?.toUpperCase(),
         targetMajor: dto.targetMajor,
         targetIntake: dto.targetIntake,
+        scholarshipGoal: dto.scholarshipGoal,
         budget: dto.budget,
         budgetCurrency: dto.budgetCurrency,
       },
@@ -126,7 +129,8 @@ export class StudentsService {
   /// arbitrary response body, so it's surfaced explicitly here.
   async export(principal: Principal): Promise<{ rows: Student[]; rowCount: number }> {
     const where: Prisma.StudentWhereInput = { archivedAt: null, ...this.scope.studentListFilter(principal) };
-    const rows = await this.prisma.student.findMany({ where, orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.student.findMany({ where, orderBy: { createdAt: 'desc' }, take: EXPORT_ROW_CAP + 1 });
+    enforceExportRowCap(rows, 'students in your scope');
     return { rows, rowCount: rows.length };
   }
 }

@@ -17,6 +17,7 @@ const EMPTY: CreateStudentInput = {
   targetCountry: "",
   targetMajor: "",
   targetIntake: "",
+  scholarshipGoal: "",
 };
 
 /// Shared create/edit dialog. `budget`/`budgetCurrency` are deliberately NOT editable here —
@@ -51,6 +52,7 @@ export function StudentFormDialog({
             targetCountry: student.targetCountry ?? "",
             targetMajor: student.targetMajor ?? "",
             targetIntake: student.targetIntake ?? "",
+            scholarshipGoal: student.scholarshipGoal ?? "",
           }
         : EMPTY,
     );
@@ -121,6 +123,19 @@ export function StudentFormDialog({
             </label>
             <Input id="targetIntake" value={form.targetIntake ?? ""} onChange={(e) => set("targetIntake", e.target.value)} />
           </div>
+        </div>
+        <div>
+          <label htmlFor="scholarshipGoal" className="mb-1 block text-sm font-medium">
+            Mục tiêu học bổng
+          </label>
+          <Input
+            id="scholarshipGoal"
+            value={form.scholarshipGoal ?? ""}
+            onChange={(e) => set("scholarshipGoal", e.target.value)}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Cùng với ngày sinh, quốc gia/ngành/kỳ nhập học mục tiêu — cần điền đầy đủ trước khi duyệt đánh giá (Assessment) của học sinh.
+          </p>
         </div>
         {error ? (
           <p role="alert" className="text-sm text-danger">

@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { EXPORT_ROW_CAP } from '../src/common/export/export-row-cap';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { issueTestSession } from './helpers/issue-session';
 
@@ -181,5 +182,54 @@ describe('Students (e2e)', () => {
       .set('Authorization', `Bearer ${managerToken}`)
       .set('X-Request-Id', 'my-fixed-request-id');
     expect(res.headers['x-request-id']).toBe('my-fixed-request-id');
+  });
+
+  /// Client Acceptance Remediation GAP-001 (CRITICAL) — export must be authorized, audited
+  /// with a mandatory reason, and hard-capped server-side (never unbounded). Same pattern
+  /// already covered for /contracts/export and /payments/export.
+  describe('export — reason required, row-capped, audited (SRS 6.21, GAP-001)', () => {
+    it('rejects export without a reason (400)', async () => {
+      const res = await request(app.getHttpServer()).get('/students/export').set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('denies a role without the students:export grant (403)', async () => {
+      const { token: salesToken } = await issueTestSession(prisma, 'demo.sales');
+      const res = await request(app.getHttpServer()).get('/students/export').query({ reason: 'attempt' }).set('Authorization', `Bearer ${salesToken}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('PERMISSION_DENIED');
+    });
+
+    it('records reason, row count and fields exported for a Student EXPORT, within the cap', async () => {
+      const reason = `E2E export check ${Date.now()}`;
+      const res = await request(app.getHttpServer()).get('/students/export').query({ reason }).set('Authorization', `Bearer ${managerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.rowCount).toBe(res.body.rows.length);
+      expect(res.body.rowCount).toBeLessThanOrEqual(EXPORT_ROW_CAP);
+
+      const auditRow = await prisma.auditLog.findFirst({
+        where: { action: 'EXPORT', objectType: 'Students' },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(auditRow).not.toBeNull();
+      expect(auditRow?.result).toBe('SUCCESS');
+      const metadata = auditRow?.metadata as { reason?: string; rowCount?: number } | null;
+      expect(metadata?.reason).toBe(reason);
+      expect(metadata?.rowCount).toBe(res.body.rowCount);
+    });
+
+    /// Deliberately NOT tested here with a live 5000+ row insert: this e2e suite runs in
+    /// parallel Jest workers against ONE shared local Postgres instance (no per-suite
+    /// transaction isolation), and `managerToken` (DEPARTMENT_MANAGER, GLOBAL scope) is
+    /// reused by several other suites (e.g. audit.e2e-spec.ts's own export test). A
+    /// temporary bulk-insert fixture here was tried and confirmed to leak into a
+    /// concurrently-running suite's assertions (that suite's export unexpectedly received
+    /// 409 while this fixture existed) — inserting-then-deleting thousands of rows around a
+    /// GLOBAL-scope query is not safe in this test architecture. The exactly-at-cap and
+    /// one-over-cap behavior of `enforceExportRowCap` itself is fully covered instead by
+    /// `export-row-cap.spec.ts` (pure unit test, no shared state); this e2e suite only
+    /// proves the endpoint is wired to call it (via the "within the cap" test above) and
+    /// that the resulting error shape/code would be `EXPORT_ROW_LIMIT_EXCEEDED` (proven at
+    /// the unit level).
   });
 });

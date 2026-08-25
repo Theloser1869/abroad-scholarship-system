@@ -40,6 +40,7 @@ function makeStudent(overrides: Partial<Student> = {}): Student {
     targetCountry: "Úc",
     targetMajor: null,
     targetIntake: null,
+    scholarshipGoal: null,
     budget: null,
     budgetCurrency: null,
     archivedAt: null,

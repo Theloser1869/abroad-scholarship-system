@@ -40,6 +40,8 @@ export interface Contract {
   completedAt: string | null;
   liquidatedAt: string | null;
   archivedAt: string | null;
+  /** Client Acceptance Remediation GAP-007 — the liquidation-record reason, required (non-empty) when transitioning to LIQUIDATED. */
+  closureReason: string | null;
   createdAt: string;
   updatedAt: string;
 }

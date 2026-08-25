@@ -122,6 +122,7 @@ export class CommissionTransactionsService {
         commissionRuleId: rule.id,
         studentId: dto.studentId ?? source.studentId ?? undefined,
         caseId: dto.caseId ?? source.caseId ?? undefined,
+        contractId: source.contractId,
         applicationId: dto.applicationId,
         sourceType: dto.sourceType,
         sourceId: dto.sourceId,
@@ -243,17 +244,23 @@ export class CommissionTransactionsService {
     return { amount: payment.paidAmount, currency: payment.currency };
   }
 
-  private async resolveSource(sourceType: string, sourceId: string): Promise<{ studentId?: string; caseId?: string }> {
+  /// `contractId` (Client Acceptance Remediation GAP-006) is resolved here regardless of
+  /// which base this transaction actually uses — directly for `sourceType==='Contract'`,
+  /// one hop via `Payment.contractId` for `sourceType==='Payment'` — so the new
+  /// `CommissionTransaction.contractId` FK stays populated either way, giving a single
+  /// direct join for "which contract earned this commission" without callers needing to
+  /// know which base a given transaction was created against.
+  private async resolveSource(sourceType: string, sourceId: string): Promise<{ studentId?: string; caseId?: string; contractId?: string }> {
     if (sourceType === 'Contract') {
       const contract = await this.prisma.contract.findUnique({ where: { id: sourceId } });
       if (!contract) throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: `Contract ${sourceId} not found.` });
       const caseRecord = await this.prisma.case.findFirst({ where: { contractId: sourceId } });
-      return { studentId: contract.studentId, caseId: caseRecord?.id };
+      return { studentId: contract.studentId, caseId: caseRecord?.id, contractId: contract.id };
     }
     const payment = await this.prisma.payment.findUnique({ where: { id: sourceId }, include: { contract: true } });
     if (!payment) throw new NotFoundException({ code: 'PAYMENT_NOT_FOUND', message: `Payment ${sourceId} not found.` });
     const caseRecord = await this.prisma.case.findFirst({ where: { contractId: payment.contractId } });
-    return { studentId: payment.contract.studentId, caseId: caseRecord?.id };
+    return { studentId: payment.contract.studentId, caseId: caseRecord?.id, contractId: payment.contractId };
   }
 
   private async getOwnRuleOrThrow(partnerId: string, ruleId: string): Promise<CommissionRule> {

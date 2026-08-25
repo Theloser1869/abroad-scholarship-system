@@ -227,6 +227,18 @@ export class TasksService {
     }
 
     if (dto.status === 'DONE') {
+      /// Client Acceptance Remediation GAP-003 (HIGH) — sheet00 README row9 / sheet06
+      /// "Mọi công việc phải có Owner + Deadline + Output + Status" (unconditional). Owner
+      /// and Deadline are already DB-required (NOT NULL); Output cannot be, since a task
+      /// legitimately has none until work is done — so, exactly mirroring the existing
+      /// BLOCKED/`blocker` precondition immediately below, DONE is where "must have Output"
+      /// actually gets enforced: either freshly supplied in this call or already on the
+      /// record (e.g. via `portalSubmitOutput`).
+      const output = dto.output ?? existing.output;
+      if (!output || output.trim().length === 0) {
+        throw new ConflictException({ code: 'OUTPUT_REQUIRED', message: 'Moving a task to DONE requires a non-empty output.' });
+      }
+
       const prerequisites = await this.prisma.taskDependency.findMany({
         where: { taskId: id },
         select: { dependsOnTask: { select: { id: true, status: true } } },

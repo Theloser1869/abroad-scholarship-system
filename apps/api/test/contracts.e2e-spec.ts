@@ -373,6 +373,260 @@ describe('Contracts (e2e)', () => {
     });
   });
 
+  /// Client Acceptance Remediation GAP-002 (CRITICAL, REQ-CONTRACT-002/CONFLICT-001) —
+  /// SIGNED -> ACTIVE now requires at least one received payment (PARTIALLY_PAID or PAID —
+  /// see docs/ASSUMPTIONS.md ASM-88 for why a full-payment threshold was NOT chosen).
+  describe('activation — payment-gated (GAP-002)', () => {
+    async function signedContract(value = 1000) {
+      const { studentId } = await createStudentWithCase(app, salesToken);
+      const createRes = await request(app.getHttpServer())
+        .post('/contracts')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ studentId, value, currency: 'USD' });
+      const contract = createRes.body;
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/submit`).set('Authorization', `Bearer ${financeToken}`);
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/approve`).set('Authorization', `Bearer ${managerToken}`).send({});
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/send`).set('Authorization', `Bearer ${financeToken}`);
+      const signRes = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/sign`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ signedDocumentId: `doc-activation-fixture-${Date.now()}` });
+      return signRes.body;
+    }
+
+    async function activate(contractId: string, token: string = financeToken) {
+      return request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${token}`).send({ status: 'ACTIVE' });
+    }
+
+    it('denies activation with zero payments recorded at all (409 PAYMENT_REQUIRED_FOR_ACTIVATION)', async () => {
+      const contract = await signedContract();
+      const res = await activate(contract.id);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('PAYMENT_REQUIRED_FOR_ACTIVATION');
+    });
+
+    it('denies activation when an installment schedule exists but nothing has actually been received yet (still PENDING)', async () => {
+      const contract = await signedContract();
+      await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: 1000, currency: 'USD', dueDate: '2026-12-01' });
+      const res = await activate(contract.id);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('PAYMENT_REQUIRED_FOR_ACTIVATION');
+    });
+
+    it('allows activation once a partial payment has been received (full payment is not required)', async () => {
+      const contract = await signedContract();
+      const installmentRes = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: 1000, currency: 'USD', dueDate: '2026-12-01' });
+      await request(app.getHttpServer())
+        .post(`/payments/${installmentRes.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', `activate-partial-${Date.now()}`)
+        .send({ amount: 200 });
+      const res = await activate(contract.id);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ACTIVE');
+      expect(res.body.activatedAt).toBeTruthy();
+    });
+
+    it('denies activation attempt from a role without contracts:edit (403), even with a payment received', async () => {
+      const contract = await signedContract();
+      const installmentRes = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: 1000, currency: 'USD', dueDate: '2026-12-01' });
+      await request(app.getHttpServer())
+        .post(`/payments/${installmentRes.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', `activate-unauth-${Date.now()}`)
+        .send({ amount: 1000 });
+      const res = await activate(contract.id, consultantAToken);
+      expect(res.status).toBe(403);
+    });
+
+    it('a concurrent duplicate activation attempt fails cleanly instead of double-processing (compare-and-swap on status)', async () => {
+      const contract = await signedContract();
+      const installmentRes = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: 1000, currency: 'USD', dueDate: '2026-12-01' });
+      await request(app.getHttpServer())
+        .post(`/payments/${installmentRes.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', `activate-race-${Date.now()}`)
+        .send({ amount: 1000 });
+
+      const [first, second] = await Promise.all([activate(contract.id), activate(contract.id)]);
+      const statuses = [first.status, second.status].sort();
+      expect(statuses).toEqual([200, 409]);
+      const failed = first.status === 409 ? first : second;
+      expect(failed.body.error.code).toBe('INVALID_STATUS_TRANSITION');
+
+      const finalContract = await request(app.getHttpServer()).get(`/contracts/${contract.id}`).set('Authorization', `Bearer ${financeToken}`);
+      expect(finalContract.body.status).toBe('ACTIVE');
+
+      // Task generation (06-operations "contract activation" trigger) must have fired
+      // exactly once, not twice, confirming the race was resolved at the DB layer and not
+      // just at the HTTP response layer.
+      const generatedTasks = await prisma.task.findMany({ where: { sourceEntityType: 'Contract', sourceEntityId: contract.id } });
+      expect(generatedTasks.length).toBeLessThanOrEqual(1);
+    });
+
+    it('a denied activation attempt is still audited (EDIT, DENIED is only for 401/403 — a 409 business rule records ERROR)', async () => {
+      const contract = await signedContract();
+      const res = await activate(contract.id);
+      expect(res.status).toBe(409);
+
+      const auditRow = await prisma.auditLog.findFirst({
+        where: { action: 'EDIT', objectType: 'Contracts', objectId: contract.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(auditRow).not.toBeNull();
+      expect(auditRow?.result).toBe('ERROR');
+    });
+  });
+
+  /// Client Acceptance Remediation GAP-007 (HIGH, REQ-CASE-014) — 11_Quan_ly_hop_dong
+  /// row9/10 "Hoàn tất | Kiểm tra nghĩa vụ... công nợ" and "Thanh lý | Tạo biên bản thanh
+  /// lý". See docs/ASSUMPTIONS.md for the exact rule (no unresolved payment before
+  /// COMPLETED; non-empty reason before LIQUIDATED).
+  describe('closure — payment-checked COMPLETED, reasoned LIQUIDATED (GAP-007)', () => {
+    async function activeContract(value = 1000) {
+      const { studentId } = await createStudentWithCase(app, salesToken);
+      const createRes = await request(app.getHttpServer())
+        .post('/contracts')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ studentId, value, currency: 'USD' });
+      const contract = createRes.body;
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/submit`).set('Authorization', `Bearer ${financeToken}`);
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/approve`).set('Authorization', `Bearer ${managerToken}`).send({});
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/send`).set('Authorization', `Bearer ${financeToken}`);
+      await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/sign`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ signedDocumentId: `doc-closure-fixture-${Date.now()}` });
+      const installmentRes = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: value, currency: 'USD', dueDate: '2026-12-01' });
+      await request(app.getHttpServer())
+        .post(`/payments/${installmentRes.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', `closure-fixture-${Date.now()}`)
+        .send({ amount: value });
+      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
+      return { contractId: contract.id as string, paymentId: installmentRes.body.id as string };
+    }
+
+    it('denies ACTIVE -> COMPLETED while a payment is PENDING/PARTIALLY_PAID/OVERDUE (409 OUTSTANDING_DEBT_REMAINS)', async () => {
+      const { studentId } = await createStudentWithCase(app, salesToken);
+      const createRes = await request(app.getHttpServer()).post('/contracts').set('Authorization', `Bearer ${financeToken}`).send({ studentId, value: 1000, currency: 'USD' });
+      const contract = createRes.body;
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/submit`).set('Authorization', `Bearer ${financeToken}`);
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/approve`).set('Authorization', `Bearer ${managerToken}`).send({});
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/send`).set('Authorization', `Bearer ${financeToken}`);
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/sign`).set('Authorization', `Bearer ${financeToken}`).send({ signedDocumentId: `doc-${Date.now()}` });
+      // Two installments: pay the first in full (satisfies activation), leave the second PENDING.
+      const paidInstallment = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: 500, currency: 'USD', dueDate: '2026-12-01' });
+      await request(app.getHttpServer())
+        .post(`/payments/${paidInstallment.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', `debt-check-${Date.now()}`)
+        .send({ amount: 500 });
+      await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 2, amount: 500, currency: 'USD', dueDate: '2027-01-01' });
+      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
+
+      const res = await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('OUTSTANDING_DEBT_REMAINS');
+    });
+
+    it('allows ACTIVE -> COMPLETED once every payment is resolved (PAID)', async () => {
+      const { contractId } = await activeContract();
+      const res = await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('COMPLETED');
+      expect(res.body.completedAt).toBeTruthy();
+    });
+
+    it('denies COMPLETED -> LIQUIDATED with no reason (409 CLOSURE_REASON_REQUIRED)', async () => {
+      const { contractId } = await activeContract();
+      await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+      const res = await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'LIQUIDATED' });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('CLOSURE_REASON_REQUIRED');
+    });
+
+    it('denies LIQUIDATED with a whitespace-only reason', async () => {
+      const { contractId } = await activeContract();
+      await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+      const res = await request(app.getHttpServer())
+        .patch(`/contracts/${contractId}/status`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ status: 'LIQUIDATED', reason: '   ' });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('CLOSURE_REASON_REQUIRED');
+    });
+
+    it('allows LIQUIDATED with a reason, and the reason is persisted as closureReason', async () => {
+      const { contractId } = await activeContract();
+      await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+      const res = await request(app.getHttpServer())
+        .patch(`/contracts/${contractId}/status`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ status: 'LIQUIDATED', reason: 'Full service delivered; final handover completed with the family.' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('LIQUIDATED');
+      expect(res.body.liquidatedAt).toBeTruthy();
+      expect(res.body.closureReason).toBe('Full service delivered; final handover completed with the family.');
+    });
+
+    it('ARCHIVED still requires no reason (only LIQUIDATED does) and succeeds once LIQUIDATED', async () => {
+      const { contractId } = await activeContract();
+      await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+      await request(app.getHttpServer())
+        .patch(`/contracts/${contractId}/status`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ status: 'LIQUIDATED', reason: 'Closed out cleanly.' });
+      const res = await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ARCHIVED' });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ARCHIVED');
+    });
+
+    /// ADMIN_FINANCE (who actually performs Contract closure per SRS role table) holds no
+    /// `cases:view` permission at all — "Chỉ dữ liệu cần thiết" (Contract/Payment/Closure
+    /// only, never Case internals). This ?contractId= filter is therefore only useful to a
+    /// GLOBAL-scoped role (Director/Manager) cross-referencing, not to HCTH itself — the
+    /// Closure/Liquidation frontend page must rely only on Contract/Payment-scoped data
+    /// (debt status), never on Case-level preconditions, for the role that actually uses it.
+    it('finding the Case linked to a Contract via ?contractId= (GLOBAL-scoped roles only — ADMIN_FINANCE cannot see Case data at all)', async () => {
+      const { studentId, caseId } = await createStudentWithCase(app, salesToken);
+      const createRes = await request(app.getHttpServer()).post('/contracts').set('Authorization', `Bearer ${financeToken}`).send({ studentId, value: 500, currency: 'USD' });
+      const contract = createRes.body;
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/submit`).set('Authorization', `Bearer ${financeToken}`);
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/approve`).set('Authorization', `Bearer ${managerToken}`).send({});
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/send`).set('Authorization', `Bearer ${financeToken}`);
+      await request(app.getHttpServer()).post(`/contracts/${contract.id}/sign`).set('Authorization', `Bearer ${financeToken}`).send({ signedDocumentId: `doc-${Date.now()}` });
+
+      const res = await request(app.getHttpServer()).get('/cases').query({ contractId: contract.id }).set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.map((c: { id: string }) => c.id)).toEqual([caseId]);
+
+      const financeRes = await request(app.getHttpServer()).get('/cases').query({ contractId: contract.id }).set('Authorization', `Bearer ${financeToken}`);
+      expect(financeRes.status).toBe(403);
+    });
+  });
+
   describe('RBAC — scope (05-commercial: Contract/Payment scope is separate from Case scope)', () => {
     it('GLOBAL roles (director, manager, finance) can read the fixture contract', async () => {
       for (const token of [directorToken, managerToken, financeToken]) {

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Contract, ContractAmendment, ContractStatus, Prisma } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult, parseSort } from '../../../common/dto/list-query.dto';
+import { EXPORT_ROW_CAP, enforceExportRowCap } from '../../../common/export/export-row-cap';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { generateOpaqueToken, hashOpaqueToken } from '../../../common/security/token.util';
@@ -246,7 +247,11 @@ export class ContractsService {
     return signed;
   }
 
-  async updateStatus(id: string, newStatus: Exclude<ContractStatus, 'DRAFT' | 'REVIEW' | 'APPROVED' | 'SENT' | 'SIGNED'>): Promise<Contract> {
+  async updateStatus(
+    id: string,
+    newStatus: Exclude<ContractStatus, 'DRAFT' | 'REVIEW' | 'APPROVED' | 'SENT' | 'SIGNED'>,
+    reason?: string,
+  ): Promise<Contract> {
     const contract = await this.requireStatus(id, Object.keys(POST_SIGN_TRANSITIONS) as ContractStatus[]);
     const allowed = POST_SIGN_TRANSITIONS[contract.status];
     if (!allowed.includes(newStatus)) {
@@ -257,7 +262,70 @@ export class ContractsService {
       });
     }
     const timestampField = { ACTIVE: 'activatedAt', COMPLETED: 'completedAt', LIQUIDATED: 'liquidatedAt', ARCHIVED: 'archivedAt' }[newStatus];
-    const updated = await this.prisma.contract.update({ where: { id }, data: { status: newStatus, [timestampField]: new Date() } });
+
+    /// Client Acceptance Remediation GAP-002 (CRITICAL, REQ-CONTRACT-002/CONFLICT-001) —
+    /// 11_Quan_ly_hop_dong places PAYMENT as its own stage between SIGNED and ACTIVE; the
+    /// customer sheet names no exact threshold (full payment vs. a deposit), so this checks
+    /// for at least one payment actually RECEIVED (PARTIALLY_PAID or PAID — see
+    /// docs/ASSUMPTIONS.md ASM-88 for the exact threshold decision and
+    /// docs/requirements/CLIENT_REQUIREMENT_CONFLICTS.md CONFLICT-001 for why this is
+    /// flagged for client confirmation rather than silently assumed final). The payment
+    /// check and the status update run in one interactive transaction, and the update
+    /// itself is a compare-and-swap (`updateMany` gated on the status this call already
+    /// observed) so two concurrent activation attempts — or a payment being refunded
+    /// between the check and the commit — can't both succeed.
+    /// Client Acceptance Remediation GAP-007 (HIGH, REQ-CASE-014) — 11_Quan_ly_hop_dong
+    /// row9 "Hoàn tất | Kiểm tra nghĩa vụ | Dịch vụ hoàn thành, công nợ, tài liệu bàn giao".
+    /// ACTIVE -> COMPLETED now requires no unresolved Payment (PENDING/PARTIALLY_PAID/
+    /// OVERDUE) on this contract — reuses the exact code (`OUTSTANDING_DEBT_REMAINS`)
+    /// Case.close() already uses for the analogous concept, so the frontend's existing
+    /// error mapping covers both without a new entry.
+    ///
+    /// COMPLETED -> LIQUIDATED now requires a non-empty `reason` (freshly supplied or
+    /// already on the record) — 11_Quan_ly_hop_dong row10 "Thanh lý | Tạo biên bản thanh
+    /// lý | Ngày thanh lý, xác nhận hai bên"; `liquidatedAt` is the date, `closureReason`
+    /// is the liquidation-record text.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (newStatus === 'ACTIVE') {
+        const receivedCount = await tx.payment.count({ where: { contractId: id, status: { in: ['PARTIALLY_PAID', 'PAID'] } } });
+        if (receivedCount === 0) {
+          throw new ConflictException({
+            code: 'PAYMENT_REQUIRED_FOR_ACTIVATION',
+            message: 'This contract has no payment recorded yet — record at least one payment before activating the contract.',
+          });
+        }
+      }
+      if (newStatus === 'COMPLETED') {
+        const unresolvedCount = await tx.payment.count({ where: { contractId: id, status: { in: ['PENDING', 'PARTIALLY_PAID', 'OVERDUE'] } } });
+        if (unresolvedCount > 0) {
+          throw new ConflictException({
+            code: 'OUTSTANDING_DEBT_REMAINS',
+            message: `${unresolvedCount} payment(s) on this contract are not yet Paid/Refunded/Waived — settle them before completing the contract.`,
+            unresolvedCount,
+          });
+        }
+      }
+      const closureReason = reason ?? contract.closureReason;
+      if (newStatus === 'LIQUIDATED') {
+        if (!closureReason || closureReason.trim().length === 0) {
+          throw new ConflictException({
+            code: 'CLOSURE_REASON_REQUIRED',
+            message: 'Liquidating a contract requires a liquidation-record reason.',
+          });
+        }
+      }
+      const result = await tx.contract.updateMany({
+        where: { id, status: contract.status },
+        data: { status: newStatus, [timestampField]: new Date(), ...(newStatus === 'LIQUIDATED' ? { closureReason } : {}) },
+      });
+      if (result.count === 0) {
+        throw new ConflictException({
+          code: 'INVALID_STATUS_TRANSITION',
+          message: `Contract status changed concurrently — it is no longer ${contract.status}. Reload and retry.`,
+        });
+      }
+      return tx.contract.findUniqueOrThrow({ where: { id } });
+    });
 
     // 06-operations/01_TASK.md "Auto-generated tasks on: ..., contract activation, ...".
     // Only the linked Case (set at `sign()`, see docs/ASSUMPTIONS.md ASM-15) has an owner
@@ -353,7 +421,8 @@ export class ContractsService {
 
   async export(principal: Principal): Promise<{ rows: Contract[]; rowCount: number }> {
     const where = this.scope.contractListFilter(principal);
-    const rows = await this.prisma.contract.findMany({ where, orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.contract.findMany({ where, orderBy: { createdAt: 'desc' }, take: EXPORT_ROW_CAP + 1 });
+    enforceExportRowCap(rows, 'contracts in your scope');
     return { rows, rowCount: rows.length };
   }
 

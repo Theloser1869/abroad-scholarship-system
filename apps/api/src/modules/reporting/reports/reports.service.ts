@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
+import { EXPORT_ROW_CAP, enforceExportRowCap } from '../../../common/export/export-row-cap';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ScopePolicyService } from '../../identity/rbac/scope-policy.service';
 import { PaymentsService } from '../../commercial/payments/payments.service';
@@ -147,7 +148,12 @@ export class ReportsService {
   /// otherwise read record-by-record.
   async exportCases(principal: Principal): Promise<{ rows: unknown[]; rowCount: number }> {
     this.assertRole(principal, ['EXECUTIVE_DIRECTOR', 'DEPARTMENT_MANAGER']);
-    const rows = await this.prisma.case.findMany({ where: this.scope.caseListFilter(principal), orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.case.findMany({
+      where: this.scope.caseListFilter(principal),
+      orderBy: { createdAt: 'desc' },
+      take: EXPORT_ROW_CAP + 1,
+    });
+    enforceExportRowCap(rows, 'cases in your scope');
     return { rows, rowCount: rows.length };
   }
 
