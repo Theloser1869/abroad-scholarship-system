@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 // second root — that would trigger Next.js's "multiple root layouts" full-reload
 // caveat between the two surfaces for no reason, since they share the same origin,
 // auth mechanism, and design tokens.
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="vi"

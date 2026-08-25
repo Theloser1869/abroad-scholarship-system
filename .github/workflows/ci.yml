@@ -34,7 +34,12 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      # Both point at the same CI-local Postgres service container — DIRECT_URL exists in the
+      # schema for platforms that pool DATABASE_URL through a connection pooler (Supabase,
+      # PgBouncer) and need a separate non-pooled connection for migrations; this CI Postgres
+      # has no pooler in front of it, so the two are identical here.
       DATABASE_URL: postgresql://abroad_app:abroad_app_dev_password@localhost:55432/abroad_scholarship_dev?schema=public
+      DIRECT_URL: postgresql://abroad_app:abroad_app_dev_password@localhost:55432/abroad_scholarship_dev?schema=public
       AUTH_JWT_SECRET: ci-only-jwt-secret-never-used-outside-this-pipeline
       AUTH_MFA_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000
       DOCUMENT_SIGNING_SECRET: ci-only-document-signing-secret
