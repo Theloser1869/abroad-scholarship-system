@@ -40,8 +40,15 @@ export function Dialog({ open, onClose, title, children, variant = "modal" }: Di
       onClose={onClose}
       onCancel={onClose}
       className={cn(
-        "m-0 max-h-none border-none bg-transparent p-0 backdrop:bg-black/40",
-        variant === "modal" && "fixed inset-0 flex h-full max-w-none items-center justify-center",
+        // `hidden` + `open:flex` (rather than an unconditional `flex`) matters here: Tailwind
+        // utility classes are author-origin and beat the UA stylesheet's
+        // `dialog:not([open]) { display: none }` regardless of specificity, so an unconditional
+        // `flex` here made every Dialog instance visually render — fully painted, stacked,
+        // un-closeable by `dialog.close()` — even while its `open` prop was false and
+        // `showModal()` had never been called. Gating display on the native `[open]` attribute
+        // keeps the CSS in sync with the actual open/closed state the `useEffect` above sets.
+        "m-0 hidden max-h-none border-none bg-transparent p-0 backdrop:bg-black/40 open:flex",
+        variant === "modal" && "fixed inset-0 h-full max-w-none items-center justify-center",
         variant === "drawer" && "fixed inset-y-0 right-0 h-full max-w-none",
       )}
     >
