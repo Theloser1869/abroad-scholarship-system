@@ -6,7 +6,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { JobRunnerService } from '../src/common/jobs/job-runner.service';
-import { drainJobs } from './helpers/drain-jobs';
+import { drainJobsToCompletion } from './helpers/drain-jobs';
 import { createStudentWithCase } from './helpers/create-student-case';
 import { issueTestSession } from './helpers/issue-session';
 import { uploadTestDocument } from './helpers/upload-document';
@@ -506,7 +506,7 @@ describe('Student/Parent Portal (e2e)', () => {
         documentType: 'other',
         title: 'Audit test doc',
       });
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       const downloadRes = await request(app.getHttpServer())
         .get(`/portal/students/${studentAId}/documents/${uploadRes.body.id}/download`)
         .set('Authorization', `Bearer ${studentSelfToken}`);

@@ -6,7 +6,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { JobRunnerService } from '../src/common/jobs/job-runner.service';
-import { drainJobs } from './helpers/drain-jobs';
+import { drainJobsToCompletion } from './helpers/drain-jobs';
 import { createStudentWithCase } from './helpers/create-student-case';
 import { uploadTestDocument } from './helpers/upload-document';
 import { issueTestSession } from './helpers/issue-session';
@@ -360,7 +360,7 @@ describe('Admission — University Choice + Application (e2e)', () => {
       // Phase 12 — download is blocked until the async malware scan completes (scanStatus
       // PENDING -> CLEAN); process the queued DOCUMENT_SCAN job synchronously instead of
       // waiting on the poll interval.
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       const downloadRes = await request(app.getHttpServer()).get(`/documents/${documentRes.body.id}/download`).set('Authorization', `Bearer ${studentSelfToken}`);
       expect(downloadRes.status).toBe(200);
       expect(downloadRes.body.downloadUrl).toMatch(/^\/documents\/download\//);

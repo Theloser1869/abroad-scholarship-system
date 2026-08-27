@@ -7,7 +7,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { JobRunnerService } from '../src/common/jobs/job-runner.service';
 import { createStudentWithCase } from './helpers/create-student-case';
-import { drainJobs } from './helpers/drain-jobs';
+import { drainJobsToCompletion } from './helpers/drain-jobs';
 import { issueTestSession } from './helpers/issue-session';
 
 const VALID_PDF = Buffer.from('%PDF-1.4\n%%EOF');
@@ -172,7 +172,7 @@ describe('Documents Platform (e2e)', () => {
 
     it('a clean file becomes downloadable once the scan job runs', async () => {
       const uploadRes = await upload(consultantAToken);
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       const doc = await prisma.document.findUnique({ where: { id: uploadRes.body.id } });
       expect(doc?.scanStatus).toBe('CLEAN');
       const res = await request(app.getHttpServer()).get(`/documents/${uploadRes.body.id}/download`).set('Authorization', `Bearer ${consultantAToken}`);
@@ -193,7 +193,7 @@ describe('Documents Platform (e2e)', () => {
         // is already covered by its own dedicated tests above.
         .attach('file', EICAR, { filename: 'eicar.txt', contentType: 'text/plain' });
       expect(uploadRes.status).toBe(201);
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       const doc = await prisma.document.findUnique({ where: { id: uploadRes.body.id } });
       expect(doc?.scanStatus).toBe('INFECTED');
       const res = await request(app.getHttpServer()).get(`/documents/${uploadRes.body.id}/download`).set('Authorization', `Bearer ${consultantAToken}`);
@@ -205,7 +205,7 @@ describe('Documents Platform (e2e)', () => {
   describe('signed download URL', () => {
     it('the byte-serving endpoint works with a valid token and rejects a tampered one', async () => {
       const uploadRes = await upload(consultantAToken);
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       const { body } = await request(app.getHttpServer()).get(`/documents/${uploadRes.body.id}/download`).set('Authorization', `Bearer ${consultantAToken}`);
       const fileRes = await request(app.getHttpServer()).get(body.downloadUrl);
       expect(fileRes.status).toBe(200);
@@ -219,7 +219,7 @@ describe('Documents Platform (e2e)', () => {
 
     it('a signed URL issued to one principal is not usable by a different principal even before expiry', async () => {
       const uploadRes = await upload(consultantAToken);
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       // Grant consultant.b VIEW/DOWNLOAD, then request a URL as consultant.a — the
       // token is scoped to consultant.a's principalId, so consultant.b downloading with
       // it (even though consultant.b independently HAS a grant) fails the token check
@@ -248,7 +248,7 @@ describe('Documents Platform (e2e)', () => {
     // uploader/shared on this document — only consultant.a (a case member) was.
     it('a GLOBAL-scope role (director) can complete both download steps for a document with no personal grant', async () => {
       const uploadRes = await upload(consultantAToken);
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       const step1 = await request(app.getHttpServer()).get(`/documents/${uploadRes.body.id}/download`).set('Authorization', `Bearer ${directorToken}`);
       expect(step1.status).toBe(200);
       const step2 = await request(app.getHttpServer()).get(step1.body.downloadUrl);
@@ -351,7 +351,7 @@ describe('Documents Platform (e2e)', () => {
 
     it('archiving does not revoke existing grants — a clean archived document stays downloadable', async () => {
       const doc = await upload(consultantAToken);
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       await request(app.getHttpServer()).post(`/documents/${doc.body.id}/archive`).set('Authorization', `Bearer ${consultantAToken}`);
       const res = await request(app.getHttpServer()).get(`/documents/${doc.body.id}/download`).set('Authorization', `Bearer ${consultantAToken}`);
       expect(res.status).toBe(200);

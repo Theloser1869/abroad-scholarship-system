@@ -8,7 +8,7 @@ import { PrismaService } from '../src/common/prisma/prisma.service';
 import { JobRunnerService } from '../src/common/jobs/job-runner.service';
 import { R2StorageProvider } from '../src/common/storage/r2-storage.provider';
 import { createStudentWithCase } from './helpers/create-student-case';
-import { drainJobs } from './helpers/drain-jobs';
+import { drainJobsToCompletion } from './helpers/drain-jobs';
 import { issueTestSession } from './helpers/issue-session';
 import { uploadTestDocument } from './helpers/upload-document';
 
@@ -176,7 +176,7 @@ describe('R2StorageProvider (S3-compatible, validated against local MinIO)', () 
       const content = Buffer.from(`%PDF-1.4\n${randomUUID()}\n%%EOF`);
       const uploadRes = await uploadTestDocument(app, consultantAToken, { ownerEntity: 'Case', ownerId: caseAId, documentType: 'other', title: 'R2 round-trip test' }, content);
       expect(uploadRes.status).toBe(201);
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
 
       const doc = await prisma.document.findUnique({ where: { id: uploadRes.body.id } });
       expect(doc?.scanStatus).toBe('CLEAN');
@@ -203,20 +203,20 @@ describe('R2StorageProvider (S3-compatible, validated against local MinIO)', () 
       // would otherwise get picked up later by a different test file's app instance (the
       // default STORAGE_PROVIDER=local one, restored in afterAll below), which would try
       // to read these MinIO-only-stored bytes off local disk and fail/dead-letter.
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
     });
 
     it('versioning creates a new object in R2/MinIO, never overwrites the original', async () => {
       if (!minioAvailable) return;
       const v1 = await uploadTestDocument(app, consultantAToken, { ownerEntity: 'Case', ownerId: caseAId, documentType: 'other', title: 'versioned doc' });
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       const v2res = await request(app.getHttpServer())
         .post(`/documents/${v1.body.id}/versions`)
         .set('Authorization', `Bearer ${consultantAToken}`)
         .attach('file', Buffer.from('%PDF-1.4\nversion 2\n%%EOF'), { filename: 'v2.pdf', contentType: 'application/pdf' });
       expect(v2res.status).toBe(201);
       expect(v2res.body.previousVersionId).toBe(v1.body.id);
-      await drainJobs(jobRunner); // the new version's own DOCUMENT_SCAN job — see comment above
+      await drainJobsToCompletion(jobRunner, prisma); // the new version's own DOCUMENT_SCAN job — see comment above
       const original = await prisma.document.findUnique({ where: { id: v1.body.id } });
       expect(original?.status).not.toBe('ARCHIVED'); // untouched, still independently readable
     });
@@ -226,7 +226,7 @@ describe('R2StorageProvider (S3-compatible, validated against local MinIO)', () 
       const uploadRes = await uploadTestDocument(app, consultantAToken, { ownerEntity: 'Case', ownerId: caseAId, documentType: 'other', title: 'private doc' });
       const res = await request(app.getHttpServer()).get(`/documents/${uploadRes.body.id}/download`).set('Authorization', `Bearer ${consultantBToken}`);
       expect(res.status).toBe(404);
-      await drainJobs(jobRunner); // see comment on the duplicate-detection test above
+      await drainJobsToCompletion(jobRunner, prisma); // see comment on the duplicate-detection test above
     });
   });
 });

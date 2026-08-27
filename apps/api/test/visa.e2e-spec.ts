@@ -6,7 +6,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { JobRunnerService } from '../src/common/jobs/job-runner.service';
-import { drainJobs } from './helpers/drain-jobs';
+import { drainJobsToCompletion } from './helpers/drain-jobs';
 import { createStudentWithCase } from './helpers/create-student-case';
 import { uploadTestDocument } from './helpers/upload-document';
 import { issueTestSession } from './helpers/issue-session';
@@ -272,7 +272,7 @@ describe('Visa (e2e)', () => {
       expect(submitRes.status).toBe(201);
       expect(submitRes.body).not.toHaveProperty('fileUrl');
 
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
       const downloadRes = await request(app.getHttpServer()).get(`/documents/${documentRes.body.id}/download`).set('Authorization', `Bearer ${consultantAToken}`);
       expect(downloadRes.status).toBe(200);
       expect(downloadRes.body.downloadUrl).toMatch(/^\/documents\/download\//);
@@ -307,7 +307,7 @@ describe('Visa (e2e)', () => {
         .set('Authorization', `Bearer ${consultantAToken}`)
         .send({ evidenceDocumentId: documentRes.body.id });
       expect(submitRes.status).toBe(201);
-      await drainJobs(jobRunner);
+      await drainJobsToCompletion(jobRunner, prisma);
 
       const consultantView = await request(app.getHttpServer()).get(`/documents/${documentRes.body.id}`).set('Authorization', `Bearer ${consultantAToken}`);
       expect(consultantView.status).toBe(200);
