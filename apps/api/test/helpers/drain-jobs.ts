@@ -36,15 +36,27 @@ export async function drainJobs(jobRunner: JobRunnerService): Promise<void> {
 /// "done." Do not use this in `jobs-platform.e2e-spec.ts` — it asserts on the real backoff
 /// delay itself, which this helper deliberately bypasses.
 export async function drainJobsToCompletion(jobRunner: JobRunnerService, prisma: PrismaService): Promise<void> {
+  const since = new Date();
   for (let i = 0; i < 20; i += 1) {
     const processed = await jobRunner.processPendingJobs();
     if (processed > 0) continue;
     const stillPending = await prisma.backgroundJob.count({ where: { status: 'PENDING' } });
-    if (stillPending === 0) return;
+    if (stillPending === 0) break;
     // Nothing due right now, but something is scheduled for a future retry — bypass the
     // real backoff delay (same trick jobs-platform.e2e-spec.ts applies manually) so the
     // next iteration actually picks it up instead of silently returning "drained".
     await prisma.backgroundJob.updateMany({ where: { status: 'PENDING' }, data: { scheduledFor: new Date() } });
+    if (i === 19) throw new Error('drainJobsToCompletion: jobs still pending after 20 iterations — a job may be stuck.');
   }
-  throw new Error('drainJobsToCompletion: jobs still pending after 20 iterations — a job may be stuck.');
+
+  // A job reaching a terminal FAILED state is not "drained failure" — it's a real
+  // processor error (permanent, or a TransientJobError that exhausted maxAttempts). Surface
+  // it here, loudly, with the actual `lastError`, instead of letting the caller's next
+  // request (a download, an access check) fail with a generic downstream error that gives
+  // no hint the real cause was a job that never succeeded.
+  const failed = await prisma.backgroundJob.findMany({ where: { status: 'FAILED', completedAt: { gte: since } } });
+  if (failed.length > 0) {
+    const detail = failed.map((j) => `  - ${j.jobType} (id=${j.id}, attempts=${j.attempts}): ${j.lastError ?? 'unknown error'}`).join('\n');
+    throw new Error(`drainJobsToCompletion: ${failed.length} job(s) reached FAILED during this drain:\n${detail}`);
+  }
 }
