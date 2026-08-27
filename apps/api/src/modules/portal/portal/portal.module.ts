@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ApplicationsModule } from '../../admission/applications/applications.module';
 import { OffersModule } from '../../admission/offers/offers.module';
 import { ScholarshipApplicationsModule } from '../../admission/scholarship-applications/scholarship-applications.module';
+import { ClosureModule } from '../../case-management/closure/closure.module';
 import { TasksModule } from '../../case-management/tasks/tasks.module';
 import { ContractsModule } from '../../commercial/contracts/contracts.module';
 import { PaymentsModule } from '../../commercial/payments/payments.module';
@@ -25,6 +26,7 @@ import { PortalService } from './portal.service';
     PortalAccessModule,
     RoadmapsModule,
     TasksModule,
+    ClosureModule,
     DocumentsModule,
     ApplicationsModule,
     OffersModule,

@@ -22,6 +22,7 @@ export function PortalNav({ studentId }: { studentId: string }) {
     { href: `${base}/pre-departure`, label: "Trước khi đi" },
     { href: `${base}/enrollment`, label: "Nhập học" },
     { href: `${base}/contracts`, label: "Hợp đồng" },
+    { href: `${base}/closure`, label: "Đóng hồ sơ" },
     { href: `${base}/notifications`, label: "Thông báo" },
   ];
 

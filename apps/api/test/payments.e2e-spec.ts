@@ -6,6 +6,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { createStudentWithCase } from './helpers/create-student-case';
+import { createTestUser } from './helpers/create-test-user';
 import { issueTestSession } from './helpers/issue-session';
 
 /// 05-commercial/02_PAYMENT.md: multiple installments, partial payment, no double-counting
@@ -80,7 +81,35 @@ describe('Payments (e2e)', () => {
       .post(`/contracts/${contract.id}/sign`)
       .set('Authorization', `Bearer ${financeToken}`)
       .send({ signedDocumentId: `doc-payments-fixture-${randomUUID()}` });
-    return signRes.body;
+    return { ...signRes.body, studentId };
+  }
+
+  /// Client Acceptance Remediation DEC-06 (2026-08-26) — Contract COMPLETED/LIQUIDATED is
+  /// no longer reachable directly via `PATCH /contracts/:id/status` once a Case is linked
+  /// (always true here — `sign()` requires+sets it). Drives the same end state through the
+  /// unified Closure workflow instead: Case→CLOSED syncs the linked Contract→COMPLETED,
+  /// then a two-party liquidation confirmation (company + a freshly linked portal student)
+  /// syncs it on to LIQUIDATED — same helper shape as `case-closure.e2e-spec.ts`.
+  async function liquidateContractViaClosureWorkflow(studentId: string): Promise<void> {
+    const caseRow = await prisma.case.findFirstOrThrow({ where: { studentId } });
+    await request(app.getHttpServer()).post(`/cases/${caseRow.id}/closure/handover`).set('Authorization', `Bearer ${financeToken}`).send({});
+    const closeRes = await request(app.getHttpServer())
+      .post(`/cases/${caseRow.id}/closure/close`)
+      .set('Authorization', `Bearer ${financeToken}`)
+      .send({ closureReason: 'Service delivered in full; final handover completed.' });
+    expect(closeRes.status).toBe(201);
+
+    const user = await createTestUser(prisma, 'STUDENT_PARENT', 'irrelevant-test-password-1!');
+    await prisma.student.update({ where: { id: studentId }, data: { portalUserId: user.id } });
+    const { token: studentToken } = await issueTestSession(prisma, user.username);
+
+    await request(app.getHttpServer()).post(`/cases/${caseRow.id}/closure/liquidation/confirm-company`).set('Authorization', `Bearer ${financeToken}`).send({});
+    const studentRes = await request(app.getHttpServer())
+      .post(`/portal/students/${studentId}/closure/liquidation/confirm`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({});
+    expect(studentRes.status).toBe(201);
+    expect(studentRes.body.status).toBe('LIQUIDATED');
   }
 
   async function createInstallment(contractId: string, overrides: Record<string, unknown> = {}) {
@@ -142,22 +171,22 @@ describe('Payments (e2e)', () => {
     // Contract already LIQUIDATED/ARCHIVED ("financial activity on a closed-out record").
     it('rejects creating an installment against a LIQUIDATED contract (409)', async () => {
       const contract = await signedContract();
-      // Client Acceptance Remediation GAP-002 — activation now requires at least one
-      // received payment; this seed payment exists only to satisfy that gate, unrelated to
-      // what this test actually asserts (creating a NEW installment post-LIQUIDATED).
-      const activationSeedPayment = await createInstallment(contract.id, { installmentNo: 1, amount: 500 });
+      // Client Acceptance Remediation GAP-002/DEC-01 — activation now requires at least 30%
+      // of the contract's value (4000 here) received; this seed payment exists only to
+      // satisfy that gate, unrelated to what this test actually asserts (creating a NEW
+      // installment post-LIQUIDATED).
+      const activationSeedPayment = await createInstallment(contract.id, { installmentNo: 1, amount: 1500 });
       await request(app.getHttpServer())
         .post(`/payments/${activationSeedPayment.id}/record`)
         .set('Authorization', `Bearer ${financeToken}`)
         .set('Idempotency-Key', randomUUID())
-        .send({ amount: 500 });
+        .send({ amount: 1500 });
       await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
-      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
-      const liquidated = await request(app.getHttpServer())
-        .patch(`/contracts/${contract.id}/status`)
-        .set('Authorization', `Bearer ${financeToken}`)
-        .send({ status: 'LIQUIDATED', reason: 'Service delivered in full; final handover completed.' });
-      expect(liquidated.body.status).toBe('LIQUIDATED');
+      // DEC-06 (2026-08-26) — COMPLETED/LIQUIDATED now go through the unified Closure
+      // workflow, not a direct Contract status PATCH (see `liquidateContractViaClosureWorkflow`).
+      await liquidateContractViaClosureWorkflow(contract.studentId);
+      const liquidatedContract = await prisma.contract.findUniqueOrThrow({ where: { id: contract.id } });
+      expect(liquidatedContract.status).toBe('LIQUIDATED');
 
       const res = await request(app.getHttpServer())
         .post(`/contracts/${contract.id}/payments`)
@@ -169,25 +198,29 @@ describe('Payments (e2e)', () => {
 
     it('rejects recording a payment against a LIQUIDATED contract (409), but refund/waive remain reachable on already-existing payments', async () => {
       const contract = await signedContract();
-      const payment = await createInstallment(contract.id, { installmentNo: 1, amount: 1000 });
-      // Client Acceptance Remediation GAP-002 — activation now requires at least one
-      // received payment; a partial payment satisfies that.
+      const payment = await createInstallment(contract.id, { installmentNo: 1, amount: 2000 });
+      // Client Acceptance Remediation GAP-002/DEC-01 — activation now requires at least 30%
+      // of the contract's value (4000 here, i.e. 1200); 1500 satisfies that while staying
+      // PARTIALLY_PAID (< the 2000 installment amount), which the rest of this test relies on.
       await request(app.getHttpServer())
         .post(`/payments/${payment.id}/record`)
         .set('Authorization', `Bearer ${financeToken}`)
         .set('Idempotency-Key', randomUUID())
-        .send({ amount: 200 });
+        .send({ amount: 1500 });
       await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
 
-      // Client Acceptance Remediation GAP-007 — ACTIVE -> COMPLETED now requires no
-      // unresolved (PENDING/PARTIALLY_PAID/OVERDUE) payment; this installment is still
-      // PARTIALLY_PAID (800 outstanding), so completion correctly fails here first.
+      // DEC-06 (2026-08-26) — this Contract is linked to a Case, so the direct
+      // COMPLETED/LIQUIDATED path on `PATCH /contracts/:id/status` is now redirected
+      // unconditionally, regardless of debt state (see `ContractsService.updateStatus`).
+      // The DEBT precondition itself is still enforced — now inside the unified Closure
+      // workflow's checklist (covered by `pre-departure-enrollment-closure.e2e-spec.ts`'s
+      // "OUTSTANDING_DEBT_REMAINS" case) — not duplicated here.
       const tooEarly = await request(app.getHttpServer())
         .patch(`/contracts/${contract.id}/status`)
         .set('Authorization', `Bearer ${financeToken}`)
         .send({ status: 'COMPLETED' });
       expect(tooEarly.status).toBe(409);
-      expect(tooEarly.body.error.code).toBe('OUTSTANDING_DEBT_REMAINS');
+      expect(tooEarly.body.error.code).toBe('USE_UNIFIED_CLOSURE_WORKFLOW');
 
       // Waiving the remaining balance is itself a legitimate way to resolve outstanding
       // debt before closure (see PaymentsService.waive's own comment) — not just paying it.
@@ -198,11 +231,7 @@ describe('Payments (e2e)', () => {
       expect(earlyWaiveRes.status).toBe(201);
       expect(earlyWaiveRes.body.status).toBe('WAIVED');
 
-      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
-      await request(app.getHttpServer())
-        .patch(`/contracts/${contract.id}/status`)
-        .set('Authorization', `Bearer ${financeToken}`)
-        .send({ status: 'LIQUIDATED', reason: 'Service delivered in full; final handover completed.' });
+      await liquidateContractViaClosureWorkflow(contract.studentId);
 
       // The payment is now WAIVED (already resolved) — recording more against it hits
       // PAYMENT_ALREADY_RESOLVED before the contract-status check is ever reached. To still

@@ -10,10 +10,20 @@ import { useScholarshipApplicationsForCase, useCreateScholarshipApplication } fr
 import { ScholarshipApplicationFormDialog } from "@/components/crm/scholarship-applications/scholarship-application-form-dialog";
 import { StatusBadge, SCHOLARSHIP_APPLICATION_STATUS_VARIANT, SCHOLARSHIP_APPLICATION_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Money } from "@/components/crm/money";
 import { Button } from "@/components/ui/button";
 
 /// Case-scoped Scholarship Applications (F05 instruction §21) — kept structurally distinct
 /// from ScholarshipMaster's own `/scholarship-masters` catalog route.
+///
+/// Client Acceptance Remediation REQ-CASE-010 (sheet05 row9, 2026-08-26) — previously no
+/// dedicated "Kết quả" (Result) view existed; an AWARDED outcome was only visible by
+/// opening each scholarship-application record individually. The "Kết quả học bổng" card
+/// below surfaces every AWARDED result (amount/coverage/period) directly on this list page,
+/// and each row now shows its award amount inline — no new route/entity, all data already
+/// returned by the existing list endpoint (`awardAmount`/`awardCurrency`/`awardCoverageType`/
+/// `awardPeriod`/`awardAcceptanceDeadline`, DEC-11 embed), a display-only addition.
 export function CaseScholarshipApplicationsContent({ caseId }: { caseId: string }) {
   const { can } = usePermissions();
   const { data: caseRecord } = useCase(caseId);
@@ -21,6 +31,8 @@ export function CaseScholarshipApplicationsContent({ caseId }: { caseId: string 
   const { data: scholarshipApplications, isLoading, error, refetch } = useScholarshipApplicationsForCase(caseId);
   const createScholarshipApplication = useCreateScholarshipApplication(caseId);
   const [createOpen, setCreateOpen] = useState(false);
+
+  const awardedApplications = (scholarshipApplications ?? []).filter((s) => s.status === "AWARDED");
 
   return (
     <div className="space-y-4">
@@ -33,6 +45,42 @@ export function CaseScholarshipApplicationsContent({ caseId }: { caseId: string 
           {can("scholarship_applications", "create") ? <Button onClick={() => setCreateOpen(true)}>+ Tạo hồ sơ học bổng</Button> : null}
         </div>
       </div>
+
+      {awardedApplications.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Kết quả học bổng</CardTitle>
+          </CardHeader>
+          <ul className="space-y-3">
+            {awardedApplications.map((s) => (
+              <li key={s.id} className="rounded border border-success/40 bg-success/5 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Link href={`/scholarship-applications/${s.id}`} className="font-medium text-primary underline-offset-2 hover:underline">
+                    {s.scholarshipMaster.name} — {s.scholarshipMaster.provider}
+                  </Link>
+                  <span className="font-semibold text-success">
+                    <Money value={s.awardAmount} currency={s.awardCurrency} />
+                  </span>
+                </div>
+                <dl className="mt-1 grid grid-cols-2 gap-x-4 text-xs text-muted-foreground sm:grid-cols-3">
+                  <div>
+                    <dt className="inline">Loại chi trả: </dt>
+                    <dd className="inline">{s.awardCoverageType ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="inline">Kỳ hạn: </dt>
+                    <dd className="inline">{s.awardPeriod ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="inline">Hạn xác nhận: </dt>
+                    <dd className="inline">{s.awardAcceptanceDeadline ? new Date(s.awardAcceptanceDeadline).toLocaleDateString("vi-VN") : "—"}</dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       {isLoading ? (
         <LoadingState />
@@ -52,7 +100,14 @@ export function CaseScholarshipApplicationsContent({ caseId }: { caseId: string 
                   {s.scholarshipMaster.name} — {s.scholarshipMaster.provider}
                 </p>
               </div>
-              <StatusBadge status={s.status} variantMap={SCHOLARSHIP_APPLICATION_STATUS_VARIANT} label={SCHOLARSHIP_APPLICATION_STATUS_LABEL[s.status]} />
+              <div className="text-right">
+                <StatusBadge status={s.status} variantMap={SCHOLARSHIP_APPLICATION_STATUS_VARIANT} label={SCHOLARSHIP_APPLICATION_STATUS_LABEL[s.status]} />
+                {s.status === "AWARDED" ? (
+                  <p className="mt-1 text-sm font-medium text-success">
+                    <Money value={s.awardAmount} currency={s.awardCurrency} />
+                  </p>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>

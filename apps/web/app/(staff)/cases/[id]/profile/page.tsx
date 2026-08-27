@@ -391,7 +391,7 @@ function ActivityRow({ record: r, caseId, canEdit, onEdit }: { record: Activity;
             {r.organization} {r.role ? `— ${r.role}` : ""}
           </p>
           <p className="text-xs text-muted-foreground">
-            {r.category ?? ""} {r.hours ? `· ${r.hours} giờ` : ""} {r.verifiedAt ? "· Đã xác minh" : ""}
+            {r.category ?? ""} {r.hours ? `· ${r.hours} giờ` : ""} {r.award ? `· Giải thưởng: ${r.award}` : ""} {r.verifiedAt ? "· Đã xác minh" : ""}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">

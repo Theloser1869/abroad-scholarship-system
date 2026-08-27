@@ -5,6 +5,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { createStudentWithCase } from './helpers/create-student-case';
+import { createTestUser } from './helpers/create-test-user';
 import { issueTestSession } from './helpers/issue-session';
 
 /// 05-commercial/01_CONTRACT.md: workflow FSM, monetary-threshold approval, immutability
@@ -280,9 +281,10 @@ describe('Contracts (e2e)', () => {
 
     it('rejects signing when the student has no active Case (409 NO_ACTIVE_CASE_FOR_STUDENT)', async () => {
       const { studentId, caseId } = await createStudentWithCase(app, salesToken);
+      await request(app.getHttpServer()).post(`/cases/${caseId}/closure/handover`).set('Authorization', `Bearer ${financeToken}`).send({});
       await request(app.getHttpServer())
-        .patch(`/cases/${caseId}/close`)
-        .set('Authorization', `Bearer ${managerToken}`)
+        .post(`/cases/${caseId}/closure/close`)
+        .set('Authorization', `Bearer ${financeToken}`)
         .send({ closureReason: 'Closed before contract signing, for the no-active-case e2e case' });
 
       const contract = await sentContract(studentId);
@@ -374,9 +376,10 @@ describe('Contracts (e2e)', () => {
   });
 
   /// Client Acceptance Remediation GAP-002 (CRITICAL, REQ-CONTRACT-002/CONFLICT-001) —
-  /// SIGNED -> ACTIVE now requires at least one received payment (PARTIALLY_PAID or PAID —
-  /// see docs/ASSUMPTIONS.md ASM-88 for why a full-payment threshold was NOT chosen).
-  describe('activation — payment-gated (GAP-002)', () => {
+  /// SIGNED -> ACTIVE now requires at least 30% of Contract.value received, net of refunds
+  /// (client-confirmed threshold, DEC-01, 2026-08-27 — see
+  /// docs/requirements/CLIENT_CLARIFICATION_SIGNOFF.md; CONFLICT-001 is now RESOLVED).
+  describe('activation — payment-gated (GAP-002, DEC-01)', () => {
     async function signedContract(value = 1000) {
       const { studentId } = await createStudentWithCase(app, salesToken);
       const createRes = await request(app.getHttpServer())
@@ -416,8 +419,24 @@ describe('Contracts (e2e)', () => {
       expect(res.body.error.code).toBe('PAYMENT_REQUIRED_FOR_ACTIVATION');
     });
 
-    it('allows activation once a partial payment has been received (full payment is not required)', async () => {
-      const contract = await signedContract();
+    it('denies activation when the amount received is below the 30% threshold (409 PAYMENT_REQUIRED_FOR_ACTIVATION, DEC-01)', async () => {
+      const contract = await signedContract(1000);
+      const installmentRes = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: 1000, currency: 'USD', dueDate: '2026-12-01' });
+      await request(app.getHttpServer())
+        .post(`/payments/${installmentRes.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', `activate-below-threshold-${Date.now()}`)
+        .send({ amount: 299 });
+      const res = await activate(contract.id);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('PAYMENT_REQUIRED_FOR_ACTIVATION');
+    });
+
+    it('allows activation once at least 30% of the contract value has been received (full payment is not required, DEC-01)', async () => {
+      const contract = await signedContract(1000);
       const installmentRes = await request(app.getHttpServer())
         .post(`/contracts/${contract.id}/payments`)
         .set('Authorization', `Bearer ${financeToken}`)
@@ -426,11 +445,39 @@ describe('Contracts (e2e)', () => {
         .post(`/payments/${installmentRes.body.id}/record`)
         .set('Authorization', `Bearer ${financeToken}`)
         .set('Idempotency-Key', `activate-partial-${Date.now()}`)
-        .send({ amount: 200 });
+        .send({ amount: 300 });
       const res = await activate(contract.id);
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('ACTIVE');
       expect(res.body.activatedAt).toBeTruthy();
+    });
+
+    it('sums multiple payments toward the 30% threshold (DEC-01)', async () => {
+      const contract = await signedContract(1000);
+      const first = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 1, amount: 500, currency: 'USD', dueDate: '2026-12-01' });
+      const second = await request(app.getHttpServer())
+        .post(`/contracts/${contract.id}/payments`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ installmentNo: 2, amount: 500, currency: 'USD', dueDate: '2026-12-15' });
+      await request(app.getHttpServer())
+        .post(`/payments/${first.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', `activate-sum-a-${Date.now()}`)
+        .send({ amount: 200 });
+      const tooEarly = await activate(contract.id);
+      expect(tooEarly.status).toBe(409);
+
+      await request(app.getHttpServer())
+        .post(`/payments/${second.body.id}/record`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Idempotency-Key', `activate-sum-b-${Date.now()}`)
+        .send({ amount: 150 });
+      const res = await activate(contract.id);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ACTIVE');
     });
 
     it('denies activation attempt from a role without contracts:edit (403), even with a payment received', async () => {
@@ -490,13 +537,19 @@ describe('Contracts (e2e)', () => {
     });
   });
 
-  /// Client Acceptance Remediation GAP-007 (HIGH, REQ-CASE-014) — 11_Quan_ly_hop_dong
-  /// row9/10 "Hoàn tất | Kiểm tra nghĩa vụ... công nợ" and "Thanh lý | Tạo biên bản thanh
-  /// lý". See docs/ASSUMPTIONS.md for the exact rule (no unresolved payment before
-  /// COMPLETED; non-empty reason before LIQUIDATED).
-  describe('closure — payment-checked COMPLETED, reasoned LIQUIDATED (GAP-007)', () => {
+  /// Client Acceptance Remediation DEC-06 (GAP-007, REQ-CASE-014, 2026-08-26) — the old
+  /// independent Contract-level COMPLETED/LIQUIDATED path (payment-checked/reasoned) is
+  /// retired: once a Contract is linked to a Case — always true by the time ACTIVE is
+  /// reachable, since `sign()` requires and sets that link — `PATCH /contracts/:id/status`
+  /// now refuses COMPLETED/LIQUIDATED and redirects to the unified `ClosureService`
+  /// (`POST /cases/:id/closure/close` / `.../liquidation/confirm-company`). The debt-check/
+  /// reason/two-party-confirmation behavior itself is now covered by
+  /// `pre-departure-enrollment-closure.e2e-spec.ts` ("full happy path", which asserts the
+  /// linked Contract syncs to COMPLETED) and `case-closure.e2e-spec.ts` (full DEC-06/07/08
+  /// matrix, including liquidation). This block only verifies the redirect itself.
+  describe('closure — Contract COMPLETED/LIQUIDATED redirect to the unified Closure workflow once a Case is linked (DEC-06)', () => {
     async function activeContract(value = 1000) {
-      const { studentId } = await createStudentWithCase(app, salesToken);
+      const { studentId, caseId } = await createStudentWithCase(app, salesToken);
       const createRes = await request(app.getHttpServer())
         .post('/contracts')
         .set('Authorization', `Bearer ${financeToken}`)
@@ -519,88 +572,70 @@ describe('Contracts (e2e)', () => {
         .set('Idempotency-Key', `closure-fixture-${Date.now()}`)
         .send({ amount: value });
       await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
-      return { contractId: contract.id as string, paymentId: installmentRes.body.id as string };
+      return { contractId: contract.id as string, caseId: caseId as string };
     }
 
-    it('denies ACTIVE -> COMPLETED while a payment is PENDING/PARTIALLY_PAID/OVERDUE (409 OUTSTANDING_DEBT_REMAINS)', async () => {
-      const { studentId } = await createStudentWithCase(app, salesToken);
-      const createRes = await request(app.getHttpServer()).post('/contracts').set('Authorization', `Bearer ${financeToken}`).send({ studentId, value: 1000, currency: 'USD' });
-      const contract = createRes.body;
-      await request(app.getHttpServer()).post(`/contracts/${contract.id}/submit`).set('Authorization', `Bearer ${financeToken}`);
-      await request(app.getHttpServer()).post(`/contracts/${contract.id}/approve`).set('Authorization', `Bearer ${managerToken}`).send({});
-      await request(app.getHttpServer()).post(`/contracts/${contract.id}/send`).set('Authorization', `Bearer ${financeToken}`);
-      await request(app.getHttpServer()).post(`/contracts/${contract.id}/sign`).set('Authorization', `Bearer ${financeToken}`).send({ signedDocumentId: `doc-${Date.now()}` });
-      // Two installments: pay the first in full (satisfies activation), leave the second PENDING.
-      const paidInstallment = await request(app.getHttpServer())
-        .post(`/contracts/${contract.id}/payments`)
-        .set('Authorization', `Bearer ${financeToken}`)
-        .send({ installmentNo: 1, amount: 500, currency: 'USD', dueDate: '2026-12-01' });
-      await request(app.getHttpServer())
-        .post(`/payments/${paidInstallment.body.id}/record`)
-        .set('Authorization', `Bearer ${financeToken}`)
-        .set('Idempotency-Key', `debt-check-${Date.now()}`)
-        .send({ amount: 500 });
-      await request(app.getHttpServer())
-        .post(`/contracts/${contract.id}/payments`)
-        .set('Authorization', `Bearer ${financeToken}`)
-        .send({ installmentNo: 2, amount: 500, currency: 'USD', dueDate: '2027-01-01' });
-      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
-
-      const res = await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
-      expect(res.status).toBe(409);
-      expect(res.body.error.code).toBe('OUTSTANDING_DEBT_REMAINS');
-    });
-
-    it('allows ACTIVE -> COMPLETED once every payment is resolved (PAID)', async () => {
-      const { contractId } = await activeContract();
+    it('denies ACTIVE -> COMPLETED directly once linked to a Case (409 USE_UNIFIED_CLOSURE_WORKFLOW)', async () => {
+      const { contractId, caseId } = await activeContract();
       const res = await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe('COMPLETED');
-      expect(res.body.completedAt).toBeTruthy();
-    });
-
-    it('denies COMPLETED -> LIQUIDATED with no reason (409 CLOSURE_REASON_REQUIRED)', async () => {
-      const { contractId } = await activeContract();
-      await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
-      const res = await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'LIQUIDATED' });
       expect(res.status).toBe(409);
-      expect(res.body.error.code).toBe('CLOSURE_REASON_REQUIRED');
+      expect(res.body.error.code).toBe('USE_UNIFIED_CLOSURE_WORKFLOW');
+      expect(res.body.error.caseId).toBe(caseId);
     });
 
-    it('denies LIQUIDATED with a whitespace-only reason', async () => {
-      const { contractId } = await activeContract();
-      await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+    it('denies COMPLETED -> LIQUIDATED directly as well, even after the unified workflow already moved it to COMPLETED', async () => {
+      const { contractId, caseId } = await activeContract();
+      await request(app.getHttpServer()).post(`/cases/${caseId}/closure/handover`).set('Authorization', `Bearer ${financeToken}`).send({});
+      const closeRes = await request(app.getHttpServer())
+        .post(`/cases/${caseId}/closure/close`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ closureReason: 'Đã hoàn tất dịch vụ.' });
+      expect(closeRes.status).toBe(201);
+
+      const contractAfter = await prisma.contract.findUniqueOrThrow({ where: { id: contractId } });
+      expect(contractAfter.status).toBe('COMPLETED');
+
       const res = await request(app.getHttpServer())
         .patch(`/contracts/${contractId}/status`)
         .set('Authorization', `Bearer ${financeToken}`)
-        .send({ status: 'LIQUIDATED', reason: '   ' });
+        .send({ status: 'LIQUIDATED', reason: 'Attempting the old direct path.' });
       expect(res.status).toBe(409);
-      expect(res.body.error.code).toBe('CLOSURE_REASON_REQUIRED');
+      expect(res.body.error.code).toBe('USE_UNIFIED_CLOSURE_WORKFLOW');
     });
 
-    it('allows LIQUIDATED with a reason, and the reason is persisted as closureReason', async () => {
-      const { contractId } = await activeContract();
-      await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
-      const res = await request(app.getHttpServer())
-        .patch(`/contracts/${contractId}/status`)
-        .set('Authorization', `Bearer ${financeToken}`)
-        .send({ status: 'LIQUIDATED', reason: 'Full service delivered; final handover completed with the family.' });
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe('LIQUIDATED');
-      expect(res.body.liquidatedAt).toBeTruthy();
-      expect(res.body.closureReason).toBe('Full service delivered; final handover completed with the family.');
-    });
-
-    it('ARCHIVED still requires no reason (only LIQUIDATED does) and succeeds once LIQUIDATED', async () => {
-      const { contractId } = await activeContract();
-      await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'COMPLETED' });
+    /// ARCHIVED itself is untouched by DEC-06 (only COMPLETED/LIQUIDATED are redirected) —
+    /// still reachable via the old `PATCH /contracts/:id/status` once a Contract has
+    /// genuinely reached LIQUIATED through the unified workflow (Case→CLOSED→two-party
+    /// liquidation, same shape as `payments.e2e-spec.ts`'s `liquidateContractViaClosureWorkflow`).
+    it('ARCHIVED remains reachable via the old Contract endpoint once LIQUIDATED through the unified workflow', async () => {
+      const { contractId, caseId } = await activeContract();
+      await request(app.getHttpServer()).post(`/cases/${caseId}/closure/handover`).set('Authorization', `Bearer ${financeToken}`).send({});
       await request(app.getHttpServer())
+        .post(`/cases/${caseId}/closure/close`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ closureReason: 'Đã hoàn tất dịch vụ.' });
+
+      const caseRow = await prisma.case.findUniqueOrThrow({ where: { id: caseId } });
+      const user = await createTestUser(prisma, 'STUDENT_PARENT', 'irrelevant-test-password-1!');
+      await prisma.student.update({ where: { id: caseRow.studentId }, data: { portalUserId: user.id } });
+      const { token: studentToken } = await issueTestSession(prisma, user.username);
+
+      await request(app.getHttpServer()).post(`/cases/${caseId}/closure/liquidation/confirm-company`).set('Authorization', `Bearer ${financeToken}`).send({});
+      const studentRes = await request(app.getHttpServer())
+        .post(`/portal/students/${caseRow.studentId}/closure/liquidation/confirm`)
+        .set('Authorization', `Bearer ${studentToken}`)
+        .send({});
+      expect(studentRes.status).toBe(201);
+
+      const liquidatedContract = await prisma.contract.findUniqueOrThrow({ where: { id: contractId } });
+      expect(liquidatedContract.status).toBe('LIQUIDATED');
+
+      const archiveRes = await request(app.getHttpServer())
         .patch(`/contracts/${contractId}/status`)
         .set('Authorization', `Bearer ${financeToken}`)
-        .send({ status: 'LIQUIDATED', reason: 'Closed out cleanly.' });
-      const res = await request(app.getHttpServer()).patch(`/contracts/${contractId}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ARCHIVED' });
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe('ARCHIVED');
+        .send({ status: 'ARCHIVED' });
+      expect(archiveRes.status).toBe(200);
+      expect(archiveRes.body.status).toBe('ARCHIVED');
     });
 
     /// ADMIN_FINANCE (who actually performs Contract closure per SRS role table) holds no

@@ -83,7 +83,9 @@ function makeChecklistItem(overrides: Partial<VisaChecklistItem> = {}): VisaChec
 
 describe("VisaDetailContent", () => {
   it("shows the forbidden state for a role without visa:view", async () => {
-    authState.principal = { userId: "u1", roleCode: "ADMIN_FINANCE" };
+    // ADMIN_FINANCE now holds view-only `visa:view` (client permission-matrix remediation,
+    // 2026-08-25) — SALES_MARKETING has no `visa` grant at all.
+    authState.principal = { userId: "u1", roleCode: "SALES_MARKETING" };
     renderWithProviders(
       <RequirePermission resource="visa" action="view">
         <VisaDetailContent id="visa-1" />

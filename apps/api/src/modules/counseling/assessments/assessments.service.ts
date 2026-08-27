@@ -129,12 +129,50 @@ export class AssessmentsService {
     return assessment;
   }
 
-  /// Client Acceptance Remediation GAP-004/GAP-005 (HIGH) — 04_Student_Profile marks DOB,
-  /// school, grade, GPA, target country/major/intake, and scholarship goal all "Bắt buộc".
-  /// None of these can reasonably be required at Student-creation time (staff routinely
-  /// opens a bare Student record before counseling has gathered target-country/major/GPA
-  /// — see docs/ASSUMPTIONS.md ASM-90 for why this is enforced stage-aware here, at
-  /// Assessment approval, rather than as a DB NOT NULL constraint on Student/AcademicRecord).
+  /// Client Acceptance Remediation GAP-004/GAP-005 (RESOLVED 2026-08-25) — 04_Student_Profile
+  /// marks DOB, school, grade, target country/major/intake, and scholarship goal all "Bắt
+  /// buộc". None of these can reasonably be required at Student-creation time (staff routinely
+  /// opens a bare Student record before counseling has gathered target-country/major) — see
+  /// docs/ASSUMPTIONS.md ASM-90 for why this is enforced stage-aware here, at Assessment
+  /// approval, rather than as a DB NOT NULL constraint on Student/AcademicRecord. Client
+  /// confirmed 2026-08-25 that this stage-aware enforcement is the intended design. GPA is
+  /// deliberately excluded from this gate — client decision (2026-08-25, CONFLICT-004): GPA
+  /// is Optional, not "Bắt buộc" (sheet17's reading wins over sheet04's). See GAP-027.
+  /// Client Acceptance Remediation sheet06 row6 ("Hồ sơ hoàn chỉnh %") — the batched,
+  /// non-throwing counterpart to `assertStudentProfileComplete` below, used by
+  /// `ReportsService` for the KPI dashboard. Reuses the EXACT same 6 conditions (never a
+  /// second/diverging definition of "complete" — this project's standing rule against
+  /// calculating the same thing differently in different places).
+  async countProfileCompleteness(caseIds: string[]): Promise<{ total: number; complete: number }> {
+    if (caseIds.length === 0) return { total: 0, complete: 0 };
+
+    const cases = await this.prisma.case.findMany({
+      where: { id: { in: caseIds } },
+      select: {
+        id: true,
+        student: { select: { dateOfBirth: true, targetCountry: true, targetMajor: true, targetIntake: true, scholarshipGoal: true } },
+      },
+    });
+    const casesWithAcademicRecord = await this.prisma.academicRecord.findMany({
+      where: { caseId: { in: caseIds }, grade: { not: null } },
+      select: { caseId: true },
+      distinct: ['caseId'],
+    });
+    const caseIdsWithAcademicRecord = new Set(casesWithAcademicRecord.map((r) => r.caseId));
+
+    const complete = cases.filter(
+      (c) =>
+        c.student.dateOfBirth !== null &&
+        c.student.targetCountry !== null &&
+        c.student.targetMajor !== null &&
+        c.student.targetIntake !== null &&
+        c.student.scholarshipGoal !== null &&
+        caseIdsWithAcademicRecord.has(c.id),
+    ).length;
+
+    return { total: cases.length, complete };
+  }
+
   private async assertStudentProfileComplete(caseId: string): Promise<void> {
     const caseRecord = await this.prisma.case.findUniqueOrThrow({ where: { id: caseId }, select: { studentId: true } });
     const student = await this.prisma.student.findUniqueOrThrow({ where: { id: caseRecord.studentId } });
@@ -146,10 +184,12 @@ export class AssessmentsService {
     if (!student.targetIntake) missing.push('targetIntake');
     if (!student.scholarshipGoal) missing.push('scholarshipGoal');
 
+    /// GPA is Optional per client decision (2026-08-25, CONFLICT-004 — sheet17's reading
+    /// wins over sheet04's "Bắt buộc") — only `grade` gates approval here.
     const academicRecord = await this.prisma.academicRecord.findFirst({
-      where: { caseId, gpa: { not: null }, grade: { not: null } },
+      where: { caseId, grade: { not: null } },
     });
-    if (!academicRecord) missing.push('academicRecord (grade + GPA)');
+    if (!academicRecord) missing.push('academicRecord (grade)');
 
     if (missing.length > 0) {
       throw new ConflictException({

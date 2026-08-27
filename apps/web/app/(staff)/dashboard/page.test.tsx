@@ -28,10 +28,16 @@ const executiveFixture: ExecutiveDashboard = {
   visas: [],
   enrollments: [],
   closedOrArchivedCases: 6,
+  kpi: {
+    profileCompleteness: { total: 10, complete: 7 },
+    writingCompleted: { total: 20, complete: 15 },
+    lorCompleted: { total: 8, complete: 8 },
+    preDepartureChecklistCompletion: { applicable: 5, complete: 2 },
+  },
 };
 
 const managerFixture: ManagerDashboard = {
-  workload: [{ ownerId: "user-1", openTasks: 3, overdueTasks: 1, onTimeCompletionRate: 0.8, averageQualityScore: 4.2 }],
+  workload: [{ ownerId: "user-1", openTasks: 3, overdueTasks: 1, onTimeCompletionRate: 0.8, averageQualityScore: 4.2, activeCases: 6, tasksPerCase: 0.5 }],
   upcomingApplicationDeadlines: 7,
 };
 
@@ -58,7 +64,22 @@ describe("DashboardPage — role-routed (F07 instruction §21/§22/§23/§24)", 
     expect(reportsApi.getMyDashboard).not.toHaveBeenCalled();
   });
 
-  it("EXECUTIVE_DIRECTOR can switch to the Manager tab, showing the raw ownerId (no name join exists on the backend)", async () => {
+  // sheet06 (Task_KPI) — the previously-missing profile-completeness/writing/LOR/pre-departure
+  // checklist completion metrics.
+  it("shows the sheet06 KPI completion card (complete/total + percent) on the Executive tab", async () => {
+    authState.principal = { userId: "u1", roleCode: "EXECUTIVE_DIRECTOR" };
+    reportsApi.getExecutiveDashboard.mockResolvedValue(executiveFixture);
+
+    renderWithProviders(<DashboardPage />);
+
+    expect(await screen.findByText("Chỉ số đầu ra & chất lượng hồ sơ")).toBeInTheDocument();
+    expect(screen.getByText("7/10 (70%)")).toBeInTheDocument();
+    expect(screen.getByText("15/20 (75%)")).toBeInTheDocument();
+    expect(screen.getByText("8/8 (100%)")).toBeInTheDocument();
+    expect(screen.getByText("2/5 (40%)")).toBeInTheDocument();
+  });
+
+  it("EXECUTIVE_DIRECTOR can switch to the Manager tab, showing the raw ownerId (no name join exists on the backend) plus sheet06 case-workload columns", async () => {
     authState.principal = { userId: "u1", roleCode: "DEPARTMENT_MANAGER" };
     reportsApi.getExecutiveDashboard.mockResolvedValue(executiveFixture);
     reportsApi.getManagerDashboard.mockResolvedValue(managerFixture);
@@ -71,6 +92,8 @@ describe("DashboardPage — role-routed (F07 instruction §21/§22/§23/§24)", 
 
     expect(await screen.findByText("user-1")).toBeInTheDocument();
     expect(screen.getByText("80%")).toBeInTheDocument();
+    expect(screen.getByText("6")).toBeInTheDocument();
+    expect(screen.getByText("0.5")).toBeInTheDocument();
   });
 
   it("CONSULTANT (non-leadership, reports:view only) sees only the self-scoped My Dashboard", async () => {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { RequirePermission } from "@/components/shell/require-permission";
 import { usePermissions } from "@/lib/permissions/use-permissions";
 import { useExecutiveDashboard, useManagerDashboard, useMyDashboard } from "@/lib/reports/hooks";
+import type { CompletionCount } from "@/lib/reports/types";
 import { StatusCountTable } from "@/components/crm/reports/status-count-table";
 import {
   CASE_STATUS_LABEL,
@@ -23,6 +24,21 @@ function KpiCard({ label, value }: { label: string; value: number | string }) {
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="mt-1 text-2xl font-semibold">{value}</p>
     </Card>
+  );
+}
+
+/// sheet06 (Task_KPI) completion metrics — always rendered as "complete/total (percent)",
+/// never just a bare percentage (so the reader can see the underlying counts, not just a
+/// derived rate). `total === 0` shows "—" rather than a misleading "0%".
+function CompletionStat({ label, stat }: { label: string; stat: CompletionCount }) {
+  const percent = stat.total > 0 ? `${Math.round((stat.complete / stat.total) * 100)}%` : "—";
+  return (
+    <div>
+      <p className="text-muted-foreground">{label}</p>
+      <p className="mt-1 font-medium">
+        {stat.complete}/{stat.total} ({percent})
+      </p>
+    </div>
   );
 }
 
@@ -119,6 +135,20 @@ function DashboardContent() {
               <StatusCountTable title="Visa" data={executive.data.visas} labelMap={VISA_STATUS_LABEL} />
               <StatusCountTable title="Nhập học" data={executive.data.enrollments} labelMap={ENROLLMENT_STATUS_LABEL} />
             </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Chỉ số đầu ra &amp; chất lượng hồ sơ</CardTitle>
+              </CardHeader>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+                <CompletionStat label="Hồ sơ hoàn chỉnh" stat={executive.data.kpi.profileCompleteness} />
+                <CompletionStat label="Writing hoàn thành" stat={executive.data.kpi.writingCompleted} />
+                <CompletionStat label="LOR hoàn tất" stat={executive.data.kpi.lorCompleted} />
+                <CompletionStat
+                  label="Checklist trước khi đi hoàn tất"
+                  stat={{ total: executive.data.kpi.preDepartureChecklistCompletion.applicable, complete: executive.data.kpi.preDepartureChecklistCompletion.complete }}
+                />
+              </div>
+            </Card>
           </div>
         )
       ) : manager.isLoading ? (
@@ -139,7 +169,9 @@ function DashboardContent() {
                 <thead className="border-b border-border text-left">
                   <tr>
                     <th className="px-3 py-2 font-medium text-muted-foreground">Người phụ trách (ID)</th>
+                    <th className="px-3 py-2 font-medium text-muted-foreground">Case đang phụ trách</th>
                     <th className="px-3 py-2 font-medium text-muted-foreground">Đang mở</th>
+                    <th className="px-3 py-2 font-medium text-muted-foreground">Task/case</th>
                     <th className="px-3 py-2 font-medium text-muted-foreground">Quá hạn</th>
                     <th className="px-3 py-2 font-medium text-muted-foreground">Tỷ lệ đúng hạn</th>
                     <th className="px-3 py-2 font-medium text-muted-foreground">Điểm chất lượng TB</th>
@@ -149,7 +181,9 @@ function DashboardContent() {
                   {manager.data.workload.map((w) => (
                     <tr key={w.ownerId} className="border-b border-border last:border-0">
                       <td className="px-3 py-2">{w.ownerId}</td>
+                      <td className="px-3 py-2">{w.activeCases}</td>
                       <td className="px-3 py-2">{w.openTasks}</td>
+                      <td className="px-3 py-2">{w.tasksPerCase !== null ? w.tasksPerCase.toFixed(1) : "—"}</td>
                       <td className="px-3 py-2">{w.overdueTasks}</td>
                       <td className="px-3 py-2">{w.onTimeCompletionRate !== null ? `${(w.onTimeCompletionRate * 100).toFixed(0)}%` : "—"}</td>
                       <td className="px-3 py-2">{w.averageQualityScore ?? "—"}</td>

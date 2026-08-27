@@ -109,7 +109,7 @@ changed. Full detail in `docs/frontend/phase-status/PHASE_F09.md`.
 | Notifications | `/notifications` | `GET /notifications`, `PATCH /notifications/:id/read` | **Implemented (F07)** |
 | Reports | `/dashboard` (role-routed Executive/Manager/Me KPI views), `/reports` (export UI) | `GET /reports/executive` \| `/reports/manager` \| `/reports/me`, `GET /reports/cases/export` | **Implemented (F07)** — ASM-78 explains the `/dashboard` vs `/reports` split |
 | Admin / Identity — Users | `/admin/users`, `/admin/users/[id]` | `GET /users`, `GET /users/:id` | F07 |
-| Admin / Identity — Audit logs | `/admin/audit-logs` | `GET /audit-logs` | F07 |
+| Admin / Identity — Audit logs | `/admin/audit-logs` | `GET /audit-logs` | **Implemented (2026-08-26, Client Acceptance Remediation — sheet07)** |
 | Admin / Identity — Jobs | `/admin/jobs`, `/admin/jobs/[id]` | `GET /admin/jobs`, `GET /admin/jobs/:id` | F07 |
 
 ## PORTAL

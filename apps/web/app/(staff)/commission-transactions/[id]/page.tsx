@@ -127,6 +127,18 @@ export function CommissionTransactionDetailContent({ id }: { id: string }) {
             </dd>
           </div>
           <div className="flex justify-between">
+            <dt className="text-muted-foreground">Visa</dt>
+            <dd>
+              {transaction.visaId ? (
+                <Link href={`/visas/${transaction.visaId}`} className="text-primary hover:underline">
+                  Xem visa →
+                </Link>
+              ) : (
+                "—"
+              )}
+            </dd>
+          </div>
+          <div className="flex justify-between">
             <dt className="text-muted-foreground">Cơ sở tính</dt>
             <dd>{transaction.basis ?? "—"}</dd>
           </div>

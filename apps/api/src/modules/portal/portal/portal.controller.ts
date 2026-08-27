@@ -179,6 +179,17 @@ export class PortalController {
     return this.portal.getEnrollments(requirePrincipal(principal), id);
   }
 
+  @Get('students/:id/closure')
+  async closure(@CurrentUser() principal: Principal | null, @Param('id', ParseUUIDPipe) id: string) {
+    return this.portal.getClosure(requirePrincipal(principal), id);
+  }
+
+  @Post('students/:id/closure/liquidation/confirm')
+  @Audit('APPROVE')
+  async confirmLiquidation(@CurrentUser() principal: Principal | null, @Param('id', ParseUUIDPipe) id: string) {
+    return this.portal.confirmLiquidation(requirePrincipal(principal), id);
+  }
+
   @Get('students/:id/contracts')
   async contracts(@CurrentUser() principal: Principal | null, @Param('id', ParseUUIDPipe) id: string, @Query() query: ContractQueryDto) {
     return this.portal.listContracts(requirePrincipal(principal), id, query);

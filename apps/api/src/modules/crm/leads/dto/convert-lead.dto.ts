@@ -1,4 +1,5 @@
-import { IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { CaseStage } from '@prisma/client';
+import { IsDateString, IsEnum, IsIn, IsOptional, IsUUID } from 'class-validator';
 
 /// SRS 6.2 duplicate-detection + merge confirmation flow. First call with no
 /// `confirmMatch` — if DuplicateDetectionService finds candidates, the endpoint responds
@@ -26,7 +27,6 @@ export class ConvertLeadDto {
   caseOwnerId?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  caseStage?: string;
+  @IsEnum(CaseStage)
+  caseStage?: CaseStage;
 }

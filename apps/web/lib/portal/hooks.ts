@@ -187,6 +187,24 @@ export function usePortalNotifications(studentId: string | undefined, params: Po
 /// one regardless of which student context the URL names). Invalidates the current student's
 /// notification list/unread-count together, same "mark read → invalidate list + unread
 /// count" rule F07 established.
+/// Client Acceptance Remediation DEC-06/07/08 (GAP-007) — read-only Closure summary.
+export function usePortalClosure(studentId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.portal.student.closure(studentId ?? ""),
+    queryFn: () => portalApi.getPortalClosure(studentId as string),
+    enabled: !!studentId,
+  });
+}
+
+/// DEC-08 — student/parent side of the two-party liquidation confirmation.
+export function useConfirmPortalLiquidation(studentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => portalApi.confirmPortalLiquidation(studentId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.portal.student.closure(studentId) }),
+  });
+}
+
 export function useMarkPortalNotificationRead(studentId: string) {
   const queryClient = useQueryClient();
   return useMutation({

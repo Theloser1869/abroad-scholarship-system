@@ -52,7 +52,7 @@ describe('Case management (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post(`/students/${studentId}/cases`)
         .set('Authorization', `Bearer ${managerToken}`)
-        .send({ stage: 'intake' });
+        .send({ stage: 'ASSESSMENT' });
 
       expect(res.status).toBe(201);
       expect(res.body.status).toBe('OPEN');
@@ -90,9 +90,13 @@ describe('Case management (e2e)', () => {
         .set('Authorization', `Bearer ${managerToken}`)
         .send({});
       await request(app.getHttpServer())
-        .patch(`/cases/${first.body.id}/close`)
+        .post(`/cases/${first.body.id}/closure/handover`)
         .set('Authorization', `Bearer ${managerToken}`)
-        .send({ closureReason: 'Service completed for this lifecycle.' });
+        .send({ overrideReason: 'DEPARTMENT_MANAGER exercising the DEC-06 exception path in this test.' });
+      await request(app.getHttpServer())
+        .post(`/cases/${first.body.id}/closure/close`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ closureReason: 'Service completed for this lifecycle.', overrideReason: 'DEPARTMENT_MANAGER exercising the DEC-06 exception path in this test.' });
 
       const second = await request(app.getHttpServer())
         .post(`/students/${studentId}/cases`)
@@ -163,16 +167,26 @@ describe('Case management (e2e)', () => {
   });
 
   describe('stage and status transitions', () => {
-    it('updates the (free-text, configurable) stage', async () => {
+    it('updates the (sheet08-controlled-enum, REQ-CASE-016) stage', async () => {
       const studentId = await createStandaloneStudent();
       const created = await request(app.getHttpServer()).post(`/students/${studentId}/cases`).set('Authorization', `Bearer ${managerToken}`).send({});
       const res = await request(app.getHttpServer())
         .patch(`/cases/${created.body.id}/stage`)
         .set('Authorization', `Bearer ${managerToken}`)
-        .send({ stage: 'assessment', department: 'counseling' });
+        .send({ stage: 'ROADMAP', department: 'counseling' });
       expect(res.status).toBe(200);
-      expect(res.body.stage).toBe('assessment');
+      expect(res.body.stage).toBe('ROADMAP');
       expect(res.body.department).toBe('counseling');
+    });
+
+    it('rejects an invalid stage value (no longer free text)', async () => {
+      const studentId = await createStandaloneStudent();
+      const created = await request(app.getHttpServer()).post(`/students/${studentId}/cases`).set('Authorization', `Bearer ${managerToken}`).send({});
+      const res = await request(app.getHttpServer())
+        .patch(`/cases/${created.body.id}/stage`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ stage: 'not_a_real_stage' });
+      expect(res.status).toBe(400);
     });
 
     it('walks the legal status chain OPEN -> ACTIVE -> ON_HOLD -> ACTIVE -> COMPLETED -> ARCHIVED', async () => {
@@ -210,22 +224,35 @@ describe('Case management (e2e)', () => {
     });
   });
 
+  /// Client Acceptance Remediation DEC-06/07/08 (2026-08-26) — closure moved to the unified
+  /// `ClosureService` (`POST /cases/:id/closure/close`). Full precondition/RBAC/override/
+  /// liquidation coverage lives in `case-closure.e2e-spec.ts` and
+  /// `pre-departure-enrollment-closure.e2e-spec.ts`; this block keeps only the two
+  /// Case-status-machine-level assertions this file already owned.
   describe('closure checks', () => {
     it('requires a closure reason (400 DTO validation without one)', async () => {
       const studentId = await createStandaloneStudent();
       const created = await request(app.getHttpServer()).post(`/students/${studentId}/cases`).set('Authorization', `Bearer ${managerToken}`).send({});
-      const res = await request(app.getHttpServer()).patch(`/cases/${created.body.id}/close`).set('Authorization', `Bearer ${managerToken}`).send({});
+      const res = await request(app.getHttpServer())
+        .post(`/cases/${created.body.id}/closure/close`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ overrideReason: 'DEPARTMENT_MANAGER exercising the DEC-06 exception path in this test.' });
       expect(res.status).toBe(400);
     });
 
-    it('closes successfully with a reason, setting closedAt', async () => {
+    it('closes successfully with a reason once handover is confirmed, setting closedAt', async () => {
       const studentId = await createStandaloneStudent();
       const created = await request(app.getHttpServer()).post(`/students/${studentId}/cases`).set('Authorization', `Bearer ${managerToken}`).send({});
-      const res = await request(app.getHttpServer())
-        .patch(`/cases/${created.body.id}/close`)
+      const overrideReason = 'DEPARTMENT_MANAGER exercising the DEC-06 exception path in this test.';
+      await request(app.getHttpServer())
+        .post(`/cases/${created.body.id}/closure/handover`)
         .set('Authorization', `Bearer ${managerToken}`)
-        .send({ closureReason: 'Student enrolled successfully.' });
-      expect(res.status).toBe(200);
+        .send({ overrideReason });
+      const res = await request(app.getHttpServer())
+        .post(`/cases/${created.body.id}/closure/close`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ closureReason: 'Student enrolled successfully.', overrideReason });
+      expect(res.status).toBe(201);
       expect(res.body.status).toBe('CLOSED');
       expect(res.body.closureReason).toBe('Student enrolled successfully.');
       expect(res.body.closedAt).toBeTruthy();
@@ -299,23 +326,36 @@ describe('Case management (e2e)', () => {
       expect(stored.ownerId).toBe(consultantAUserId);
     });
 
-    it('DENIES a non-member from updating stage/status/closing the case (cross-case isolation on writes)', async () => {
+    it('DENIES a non-member from updating stage/status (cross-case isolation on writes)', async () => {
       const seedCase = await prisma.case.findUniqueOrThrow({ where: { caseCode: 'CASE-2026-90001' } });
+      // A VALID enum value on purpose — this test proves the scope check (404) fires, not
+      // DTO validation (400); an invalid value would be rejected before the scope check ever ran.
       const stageRes = await request(app.getHttpServer())
         .patch(`/cases/${seedCase.id}/stage`)
         .set('Authorization', `Bearer ${consultantBToken}`)
-        .send({ stage: 'hacked' });
+        .send({ stage: 'ARCHIVE' });
       expect(stageRes.status).toBe(404);
 
+      // The case must be completely untouched by the denied attempt.
+      const stillOpen = await prisma.case.findUniqueOrThrow({ where: { id: seedCase.id } });
+      expect(stillOpen.stage).not.toBe('ARCHIVE');
+      expect(stillOpen.status).not.toBe('CLOSED');
+    });
+
+    /// Client Acceptance Remediation DEC-06 (2026-08-26) — CONSULTANT has no
+    /// `case-closure:execute` grant at all (standard closure is HCTH-only; CONSULTANT may
+    /// only `request`), so a non-member consultant is denied at the permission-guard layer
+    /// (403) before the case-ownership scope check ever runs — unlike `stage`/`status`
+    /// above, which CONSULTANT does hold a role-level grant for.
+    it('DENIES closing the case to a CONSULTANT entirely (403, no case-closure:execute grant)', async () => {
+      const seedCase = await prisma.case.findUniqueOrThrow({ where: { caseCode: 'CASE-2026-90001' } });
       const closeRes = await request(app.getHttpServer())
-        .patch(`/cases/${seedCase.id}/close`)
+        .post(`/cases/${seedCase.id}/closure/close`)
         .set('Authorization', `Bearer ${consultantBToken}`)
         .send({ closureReason: 'unauthorized attempt' });
-      expect(closeRes.status).toBe(404);
+      expect(closeRes.status).toBe(403);
 
-      // The case must be completely untouched by the denied attempts.
       const stillOpen = await prisma.case.findUniqueOrThrow({ where: { id: seedCase.id } });
-      expect(stillOpen.stage).not.toBe('hacked');
       expect(stillOpen.status).not.toBe('CLOSED');
     });
   });

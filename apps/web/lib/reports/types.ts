@@ -18,6 +18,19 @@ export interface CurrencyAmount {
   amount: string;
 }
 
+/// sheet06 (Task_KPI) rows 6/9-12/14 — "complete" is always a subset of "total"/"applicable",
+/// computed server-side from the same single source of truth each underlying entity's own
+/// service already uses (never recalculated here, per F07 §21/§30).
+export interface CompletionCount {
+  total: number;
+  complete: number;
+}
+
+export interface ApplicableCompletionCount {
+  applicable: number;
+  complete: number;
+}
+
 /// EXECUTIVE_DIRECTOR/DEPARTMENT_MANAGER only (`ReportsService.assertRole`) — both roles see
 /// the SAME executive dashboard (no ED-only vs DM-only split on the backend).
 export interface ExecutiveDashboard {
@@ -33,6 +46,12 @@ export interface ExecutiveDashboard {
   visas: StatusCount[];
   enrollments: StatusCount[];
   closedOrArchivedCases: number;
+  kpi: {
+    profileCompleteness: CompletionCount;
+    writingCompleted: CompletionCount;
+    lorCompleted: CompletionCount;
+    preDepartureChecklistCompletion: ApplicableCompletionCount;
+  };
 }
 
 /// `ownerId` is a raw user id — `ReportsService.managerDashboard` does not join `User` for a
@@ -46,6 +65,11 @@ export interface ManagerWorkloadRow {
   overdueTasks: number;
   onTimeCompletionRate: number | null;
   averageQualityScore: number | null;
+  /// sheet06 rows 3/4 ("Case đang phụ trách", "Task/case") — `tasksPerCase` is
+  /// `openTasks / activeCases`, `null` when `activeCases` is 0 (same null-dash convention as
+  /// `onTimeCompletionRate`/`averageQualityScore` above).
+  activeCases: number;
+  tasksPerCase: number | null;
 }
 
 export interface ManagerDashboard {

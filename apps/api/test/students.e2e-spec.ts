@@ -47,8 +47,11 @@ describe('Students (e2e)', () => {
   });
 
   it('denies an authenticated caller whose role lacks the permission (403)', async () => {
-    const { token: salesToken } = await issueTestSession(prisma, 'demo.sales');
-    const res = await request(app.getHttpServer()).get('/students').set('Authorization', `Bearer ${salesToken}`);
+    // `demo.sales` (SALES_MARKETING) now holds `students:view` (client permission-matrix
+    // remediation, 2026-08-25) — `admin` (SYSTEM_ADMIN) is a role with genuinely zero
+    // `students` grant, same choice `rbac.e2e-spec.ts`'s "NONE scope" block uses.
+    const { token: adminToken } = await issueTestSession(prisma, 'admin');
+    const res = await request(app.getHttpServer()).get('/students').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('PERMISSION_DENIED');
   });

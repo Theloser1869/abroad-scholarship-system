@@ -36,6 +36,7 @@ function makeTransaction(overrides: Partial<CommissionTransaction> = {}): Commis
     caseId: null,
     applicationId: null,
     contractId: null,
+    visaId: null,
     sourceType: "Payment",
     sourceId: "payment-12345678",
     basis: null,

@@ -95,4 +95,38 @@ describe("CaseScholarshipApplicationsContent (list, distinct from ScholarshipMas
 
     expect(await screen.findByText("Chưa có hồ sơ học bổng nào.")).toBeInTheDocument();
   });
+
+  // Client Acceptance Remediation REQ-CASE-010 (sheet05 row9, 2026-08-26) — the "Kết quả
+  // học bổng" (Result) summary that previously didn't exist (status/amount were only
+  // visible by opening each record individually).
+  it("shows no Kết quả học bổng summary card when nothing is AWARDED yet", async () => {
+    authState.principal = { userId: "u1", roleCode: "CONSULTANT" };
+    scholarshipApplicationsApi.listScholarshipApplicationsForCase.mockResolvedValue([makeScholarshipApplication({ status: "UNDER_REVIEW" })]);
+
+    renderWithProviders(<CaseScholarshipApplicationsContent caseId="case-1" />);
+
+    await screen.findByText("SCH-2026-00001");
+    expect(screen.queryByText("Kết quả học bổng")).not.toBeInTheDocument();
+  });
+
+  it("surfaces the award amount/coverage/period in a Kết quả học bổng summary card once AWARDED, without opening the record", async () => {
+    authState.principal = { userId: "u1", roleCode: "CONSULTANT" };
+    scholarshipApplicationsApi.listScholarshipApplicationsForCase.mockResolvedValue([
+      makeScholarshipApplication({
+        status: "AWARDED",
+        awardAmount: "5000.00",
+        awardCurrency: "USD",
+        awardCoverageType: "Toàn phần",
+        awardPeriod: "4 năm",
+        awardAcceptanceDeadline: "2026-09-01T00:00:00.000Z",
+      }),
+    ]);
+
+    renderWithProviders(<CaseScholarshipApplicationsContent caseId="case-1" />);
+
+    expect(await screen.findByText("Kết quả học bổng")).toBeInTheDocument();
+    expect(screen.getAllByText(/USD/).length).toBeGreaterThan(0);
+    expect(screen.getByText("Toàn phần")).toBeInTheDocument();
+    expect(screen.getByText(/4 năm/)).toBeInTheDocument();
+  });
 });

@@ -47,8 +47,18 @@ export function LoginForm() {
     //   behind it; redirecting a browser navigation there would render raw proxied API
     //   output instead of the app, not a security hole but a broken destination that a
     //   crafted `?next=` should not be able to force.
+    // A `next` captured before this login (e.g. an unauthenticated hit on a staff URL, or —
+    // as live RBAC testing on this exact page just caught — logging out of /dashboard as
+    // one role and back in as another on the same browser) must not send the *new*
+    // session's role into a route it doesn't belong on: STUDENT_PARENT only ever has
+    // `portal:access` (never any /dashboard-side resource), and no staff role has
+    // `portal:access` at all, so a captured `next` from the "wrong side" would otherwise
+    // land the user on a page they're immediately denied.
+    const isStudentParent = roleCode === "STUDENT_PARENT";
+    const isOnRoleSide = !!next && (isStudentParent ? next.startsWith("/portal") : !next.startsWith("/portal"));
     const isSafeInternalPath =
       !!next &&
+      isOnRoleSide &&
       next.startsWith("/") &&
       !next.startsWith("//") &&
       !next.startsWith("/\\") &&
@@ -58,7 +68,7 @@ export function LoginForm() {
       router.replace(next);
       return;
     }
-    router.replace(roleCode === "STUDENT_PARENT" ? "/portal" : "/dashboard");
+    router.replace(isStudentParent ? "/portal" : "/dashboard");
   }
 
   async function handleCredentialsSubmit(event: FormEvent<HTMLFormElement>) {

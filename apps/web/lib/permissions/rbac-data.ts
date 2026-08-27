@@ -13,12 +13,14 @@ export type Resource =
   | "leads"
   | "students"
   | "cases"
+  | "case-closure"
   | "contracts"
   | "payments"
   | "tasks"
   | "assessments"
   | "roadmaps"
   | "profile_evidence"
+  | "school_master"
   | "writing"
   | "documents"
   | "admission_master"
@@ -54,13 +56,18 @@ type GrantMap = Partial<Record<Resource, Action[]>>;
 const EXECUTIVE_DIRECTOR_GRANTS: GrantMap = {
   leads: ["view", "create", "edit", "assign", "convert"],
   students: ["view", "create", "edit", "archive", "export"],
-  cases: ["view", "edit", "assign", "close"],
+  cases: ["view", "edit", "assign"],
+  // Client Acceptance Remediation DEC-06 (GAP-007, 2026-08-26) — the old `cases:close`
+  // grant is retired; EXECUTIVE_DIRECTOR may exercise the audited exception path
+  // (ClosureService requires an `overrideReason` from this role, never a weaker check).
+  "case-closure": ["view", "execute"],
   contracts: ["view", "create", "edit", "approve", "send", "sign", "amend", "export"],
   payments: ["view", "export"],
   tasks: ["view", "create", "edit", "assign"],
   assessments: ["view", "create", "edit", "approve"],
   roadmaps: ["view", "create", "edit", "approve"],
   profile_evidence: ["view", "create", "edit"],
+  school_master: ["view", "create", "edit"],
   writing: ["view", "create", "edit"],
   documents: ["view", "create", "download", "edit", "share", "archive"],
   admission_master: ["view", "create", "edit", "verify"],
@@ -80,20 +87,28 @@ const EXECUTIVE_DIRECTOR_GRANTS: GrantMap = {
   commission_transactions: ["view", "create", "edit"],
   reports: ["view", "export"],
   users: ["view"],
+  // sheet07 (Audit_Log) — backend seed.ts grants ED `audit_logs:view` alongside `users:view`
+  // (this mirror had drifted: the nav-config.ts item existed but this grant was missing,
+  // which silently 403'd the page for the very role meant to use it).
+  audit_logs: ["view"],
 };
 
-// DEPARTMENT_MANAGER: identical to EXECUTIVE_DIRECTOR except zero `users` grant (ED gets
-// `users:view`, DM does not — RBAC_MATRIX.md §2 note: "separation of duties").
-const { users: _edUsersGrant, ...DEPARTMENT_MANAGER_GRANTS } = EXECUTIVE_DIRECTOR_GRANTS;
+// DEPARTMENT_MANAGER: identical to EXECUTIVE_DIRECTOR except zero `users`/`audit_logs` grant
+// (ED gets both, DM gets neither — RBAC_MATRIX.md §2 note: "separation of duties").
+const { users: _edUsersGrant, audit_logs: _edAuditLogsGrant, ...DEPARTMENT_MANAGER_GRANTS } = EXECUTIVE_DIRECTOR_GRANTS;
 void _edUsersGrant;
+void _edAuditLogsGrant;
 
 const CONSULTANT_GRANTS: GrantMap = {
   students: ["view", "edit"],
-  cases: ["view", "edit", "assign", "close"],
+  cases: ["view", "edit", "assign"],
+  // DEC-06 (2026-08-26) — Consultant may only request closure (advisory), never execute.
+  "case-closure": ["view", "request"],
   tasks: ["view", "create", "edit", "assign"],
   assessments: ["view", "create", "edit"],
   roadmaps: ["view", "create", "edit"],
   profile_evidence: ["view", "create", "edit"],
+  school_master: ["view"],
   writing: ["view", "create", "edit"],
   documents: ["view", "create", "download", "edit", "share", "archive"],
   admission_master: ["view"],
@@ -105,6 +120,10 @@ const CONSULTANT_GRANTS: GrantMap = {
   visa_checklist_templates: ["view"],
   pre_departure: ["view", "create", "edit"],
   enrollment: ["view", "create", "edit"],
+  // `partner: ["view"]` added per the client's own permission matrix (sheet03
+  // Phan_quyen_module row "Partner CRM": Tư vấn = "Xem") — mirrors the same grant added to
+  // database/seeds/seed.ts's CONSULTANT block, confirmed via live RBAC re-audit.
+  partner: ["view"],
   reports: ["view"],
 };
 
@@ -115,6 +134,7 @@ const DOCUMENT_SPECIALIST_GRANTS: GrantMap = {
   assessments: ["view"],
   roadmaps: ["view"],
   profile_evidence: ["view"],
+  school_master: ["view"],
   writing: ["view"],
   documents: ["view", "create", "download", "edit", "share", "archive"],
   admission_master: ["view"],
@@ -133,12 +153,28 @@ const DOCUMENT_SPECIALIST_GRANTS: GrantMap = {
 
 const SALES_MARKETING_GRANTS: GrantMap = {
   leads: ["view", "create", "edit", "assign", "convert"],
+  // `students: ["view"]` added per the client's own permission matrix (sheet03
+  // Phan_quyen_module row "Student Profile": Sale/Marketing = "Hạn chế") — mirrors the same
+  // grant added to database/seeds/seed.ts's SALES_MARKETING block, confirmed via live RBAC
+  // re-audit. View-only, not edit.
+  students: ["view"],
   admission_master: ["view"],
   visa_checklist_templates: ["view"],
   reports: ["view"],
 };
 
 const ADMIN_FINANCE_GRANTS: GrantMap = {
+  // DEC-06 (GAP-007, 2026-08-26) — HCTH is the standard executing actor of the unified
+  // Closure/Liquidation workflow. A new, narrow `case-closure` grant, not a broadened
+  // `cases:*` grant (which stays absent for this role — see
+  // docs/requirements/CLOSURE_LIQUIDATION_DESIGN.md).
+  "case-closure": ["view", "execute"],
+  // `students`/`visa`: ["view"] added per the client's own permission matrix (sheet03
+  // Phan_quyen_module rows "Student Profile" and "Visa": HCTH = "Hạn chế" on both) —
+  // mirrors the same grants added to database/seeds/seed.ts's ADMIN_FINANCE block,
+  // confirmed via live RBAC re-audit.
+  students: ["view"],
+  visa: ["view"],
   contracts: ["view", "create", "edit", "send", "sign", "export"],
   payments: ["view", "create", "record", "refund", "waive", "export"],
   partner: ["view"],

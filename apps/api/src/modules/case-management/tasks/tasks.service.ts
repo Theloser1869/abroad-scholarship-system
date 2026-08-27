@@ -61,6 +61,15 @@ export class TasksService {
     return { ...task, isOverdue: this.isOverdue(task) };
   }
 
+  /// Client Acceptance Remediation DEC-07 (GAP-007) — the "Open Tasks" closure-checklist
+  /// item. Extracted from what was previously an inline `prisma.task.count` query inside
+  /// `CasesService.close()` (the same NOT_STARTED/IN_PROGRESS/BLOCKED = "open" definition,
+  /// unchanged), so the Closure module has a real named method to call instead of a second
+  /// ad hoc Prisma query — "sử dụng service/helper hiện tại nếu có, không duplicate logic."
+  async countOpenForCase(caseId: string): Promise<number> {
+    return this.prisma.task.count({ where: { caseId, status: { notIn: TERMINAL_STATUSES } } });
+  }
+
   async listForCase(principal: Principal, caseId: string, query: TaskQueryDto): Promise<PaginatedResult<TaskWithComputed>> {
     await this.scope.assertCaseAccessible(principal, caseId);
     return this.queryTasks(principal, { ...this.filterFor(query), caseId }, query);

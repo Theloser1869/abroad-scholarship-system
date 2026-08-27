@@ -11,12 +11,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("Sidebar — permission-aware navigation", () => {
-  it("SALES_MARKETING sees Leads but not Students/Cases/Admin (F02 instruction §16 — capability-driven, not role-name-driven)", () => {
+  it("SALES_MARKETING sees Leads and Students (view-only, client permission-matrix remediation 2026-08-25) but not Cases/Admin (F02 instruction §16 — capability-driven, not role-name-driven)", () => {
     authState.principal = { roleCode: "SALES_MARKETING" };
     render(<Sidebar />);
 
     expect(screen.getByText("Leads")).toBeInTheDocument();
-    expect(screen.queryByText("Học sinh")).not.toBeInTheDocument();
+    expect(screen.getByText("Học sinh")).toBeInTheDocument();
     expect(screen.queryByText("Case")).not.toBeInTheDocument();
     expect(screen.queryByText("Người dùng")).not.toBeInTheDocument();
   });

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { Audit } from '../../../common/audit/audit.interceptor';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { Principal } from '../../../common/context/principal';
@@ -8,16 +8,19 @@ import { CreateAcademicRecordDto } from './dto/create-academic-record.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { CreateCompetitionDto } from './dto/create-competition.dto';
 import { CreateResearchProjectDto } from './dto/create-research-project.dto';
+import { CreateSchoolMasterDto } from './dto/create-school-master.dto';
 import { CreateTestRecordDto } from './dto/create-test-record.dto';
 import { UpdateAcademicRecordDto } from './dto/update-academic-record.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
 import { UpdateCompetitionDto } from './dto/update-competition.dto';
 import { UpdateResearchProjectDto } from './dto/update-research-project.dto';
+import { UpdateSchoolMasterDto } from './dto/update-school-master.dto';
 import { UpdateTestRecordDto } from './dto/update-test-record.dto';
 import { AcademicRecordsService } from './academic-records.service';
 import { ActivitiesService } from './activities.service';
 import { CompetitionsService } from './competitions.service';
 import { ResearchProjectsService } from './research-projects.service';
+import { SchoolMastersService } from './school-masters.service';
 import { TestRecordsService } from './test-records.service';
 
 /// 07-profile/02_PROFILE_EVIDENCE.md — five structurally similar Case-scoped domains,
@@ -67,6 +70,34 @@ export class AcademicRecordsController {
   @Audit('EDIT')
   async verify(@CurrentUser() principal: Principal | null, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.verify(requirePrincipal(principal), id);
+  }
+}
+
+/// DEC-05(b) (2026-08-27) — a curated school list `AcademicRecord.school` can optionally
+/// link against; its own `school_master` permission resource (view/create/edit), separate
+/// from `profile_evidence`, since this is master-data curation, not case-scoped work.
+@Controller('school-masters')
+export class SchoolMastersController {
+  constructor(private readonly service: SchoolMastersService) {}
+
+  @Get()
+  @RequirePermission('school_master', 'view')
+  async list(@Query('search') search?: string) {
+    return this.service.list(search);
+  }
+
+  @Post()
+  @RequirePermission('school_master', 'create')
+  @Audit('CREATE')
+  async create(@Body() dto: CreateSchoolMasterDto) {
+    return this.service.create(dto);
+  }
+
+  @Patch(':id')
+  @RequirePermission('school_master', 'edit')
+  @Audit('EDIT')
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSchoolMasterDto) {
+    return this.service.update(id, dto);
   }
 }
 

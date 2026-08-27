@@ -85,6 +85,30 @@ enum CaseStatus {
   ARCHIVED
 }
 
+/// Client Acceptance Remediation REQ-CASE-016 (2026-08-26) — sheet08 (Case_Workflow)'s own
+/// 15-stage narrative, formalized as a controlled enum. Previously free-text (`String`,
+/// `@MaxLength(100)`), which let `Case.stage` drift from the real, independently-gated
+/// sub-entity statuses (Assessment/Roadmap/Application/etc. each already enforce their own
+/// FSM — only this umbrella display label was unvalidated). Client confirmed: a controlled
+/// enum, not a value derived live from sub-entity status (a larger, unrequested change).
+enum CaseStage {
+  LEAD_TO_CONTRACT
+  CONTRACT_SIGNING
+  ASSESSMENT
+  ROADMAP
+  PROFILE_DEVELOPMENT
+  WRITING
+  SCHOOL_SELECTION
+  APPLICATION
+  OFFER
+  SCHOLARSHIP
+  VISA
+  PRE_DEPARTURE
+  ENROLLMENT
+  CLOSURE
+  ARCHIVE
+}
+
 enum CaseMemberRole {
   OWNER
   COLLABORATOR
@@ -337,6 +361,11 @@ model User {
   studentSelfLink       Student?             @relation("StudentPortalUser")
   contactLinks          StudentContact[]     @relation("StudentContactPortalUser")
   parentInvitationsSent ParentInvitation[]   @relation("ParentInvitationInvitedBy")
+
+  /// Client Acceptance Remediation DEC-06/07/08 — Closure/Liquidation actor back-relations.
+  closureHandoversPerformed             ClosureHandoverRecord[]   @relation("ClosureHandoverHandedOverBy")
+  liquidationCompanyConfirmations       LiquidationConfirmation[] @relation("LiquidationCompanyConfirmedBy")
+  liquidationStudentParentConfirmations LiquidationConfirmation[] @relation("LiquidationStudentParentConfirmedBy")
 
   @@map("users")
 }
@@ -640,7 +669,12 @@ model Case {
   /// invention ASM-06 already declined to do). Configurable master data in spirit (SRS
   /// section 2), not a hard-coded enum.
   department    String?
-  stage         String
+  /// REQ-CASE-016 (2026-08-26) — sheet08's 15-stage narrative, controlled enum. Default
+  /// `CONTRACT_SIGNING` (not `LEAD_TO_CONTRACT`): a Case row only starts existing via
+  /// `CasesService.createForStudent()`, independently of Contract signing (REQ-CASE-002 —
+  /// Student/Case are created first, Contract links after), so a freshly-created Case is
+  /// already past stage 1 and not yet at stage 3 (Assessment hasn't started).
+  stage         CaseStage  @default(CONTRACT_SIGNING)
   status        CaseStatus @default(OPEN)
   closureReason String?    @map("closure_reason")
   openedAt      DateTime   @default(now()) @map("opened_at")
@@ -678,6 +712,12 @@ model Case {
   /// Phase 10 — Partners (10-partners/*.md), domain 8's junction/fact tables.
   partnerStudentLinks    PartnerStudentLink[]
   commissionTransactions CommissionTransaction[]
+
+  /// Client Acceptance Remediation DEC-06/07/08 (GAP-007, REQ-CASE-014) — the unified
+  /// Closure/Liquidation workflow's document-handover and two-party liquidation records,
+  /// one of each per Case (see `ClosureHandoverRecord`/`LiquidationConfirmation` below).
+  closureHandoverRecord   ClosureHandoverRecord?
+  liquidationConfirmation LiquidationConfirmation?
 
   @@index([studentId])
   @@index([status])
@@ -833,6 +873,68 @@ model TaskDependency {
 }
 
 // ---------------------------------------------------------------------------
+// Closure / Liquidation domain — ClosureHandoverRecord, LiquidationConfirmation
+// (Client Acceptance Remediation DEC-06/07/08, GAP-007/REQ-CASE-014 — unifies the
+// previously-separate Contract-level and Case-level closure mechanisms into one
+// Case-owned workflow. See docs/requirements/CLOSURE_LIQUIDATION_DESIGN.md.)
+// ---------------------------------------------------------------------------
+
+/// DEC-07 — "Tài liệu bàn giao" (document handover), one of the 6 mandatory closure
+/// preconditions, previously unchecked by either old closure path. One row per Case
+/// (created lazily on first handover confirmation) — deliberately PENDING/COMPLETED only,
+/// never auto-inferred as not-applicable (unlike Visa's closure-checklist item), since the
+/// client's decision is explicit that handover must actually be checked.
+model ClosureHandoverRecord {
+  id             String         @id @default(uuid())
+  caseId         String         @unique @map("case_id")
+  case           Case           @relation(fields: [caseId], references: [id])
+  status         HandoverStatus @default(PENDING)
+  handedOverAt   DateTime?      @map("handed_over_at")
+  handedOverById String?        @map("handed_over_by_id")
+  handedOverBy   User?          @relation("ClosureHandoverHandedOverBy", fields: [handedOverById], references: [id])
+  recipientName  String?        @map("recipient_name")
+  notes          String?
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  @@map("closure_handover_records")
+}
+
+enum HandoverStatus {
+  PENDING
+  COMPLETED
+}
+
+/// DEC-08 — "Xác nhận hai bên" (two-party liquidation confirmation), replacing the old
+/// single free-text `Contract.closureReason` liquidation note. One row per Case, created
+/// lazily on the first confirmation from either side. Each side's confirmation is its own
+/// independent authenticated-actor + timestamp pair — never a single event representing
+/// both. Immutable once both sides are set (`status` flips to LIQUIDATED and the service
+/// layer refuses any further update — see `ClosureService`).
+model LiquidationConfirmation {
+  id                         String            @id @default(uuid())
+  caseId                     String            @unique @map("case_id")
+  case                       Case              @relation(fields: [caseId], references: [id])
+  status                     LiquidationStatus @default(PENDING)
+  companyConfirmedAt         DateTime?         @map("company_confirmed_at")
+  companyConfirmedById       String?           @map("company_confirmed_by_id")
+  companyConfirmedBy         User?             @relation("LiquidationCompanyConfirmedBy", fields: [companyConfirmedById], references: [id])
+  studentParentConfirmedAt   DateTime?         @map("student_parent_confirmed_at")
+  studentParentConfirmedById String?           @map("student_parent_confirmed_by_id")
+  studentParentConfirmedBy   User?             @relation("LiquidationStudentParentConfirmedBy", fields: [studentParentConfirmedById], references: [id])
+  liquidatedAt               DateTime?         @map("liquidated_at")
+  createdAt                  DateTime          @default(now()) @map("created_at")
+  updatedAt                  DateTime          @updatedAt @map("updated_at")
+
+  @@map("liquidation_confirmations")
+}
+
+enum LiquidationStatus {
+  PENDING
+  LIQUIDATED
+}
+
+// ---------------------------------------------------------------------------
 // Counseling domain — Assessment, AssessmentCriterion, Roadmap, RoadmapMilestone,
 // RoadmapMilestoneDependency (Phase 02 foundation, extended Phase 07 — 07-profile/
 // 01_ASSESSMENT_ROADMAP.md)
@@ -977,10 +1079,17 @@ model RoadmapMilestoneDependency {
 /// historical academic records nếu đó là dữ liệu theo kỳ/năm"). Editing THIS period's own
 /// GPA in place (a correction) is fine — that's not the history the rule protects.
 model AcademicRecord {
-  id                 String    @id @default(uuid())
-  caseId             String    @map("case_id")
-  case               Case      @relation(fields: [caseId], references: [id])
+  id                 String        @id @default(uuid())
+  caseId             String        @map("case_id")
+  case               Case          @relation(fields: [caseId], references: [id])
   school             String
+  /// Client Acceptance Remediation DEC-05(b) (2026-08-27) — optional link to a curated
+  /// `SchoolMaster` row. When set, `school` above is resolved server-side from
+  /// `schoolMaster.name` (never trusted from the client directly, to avoid drift). When
+  /// null, `school` is plain free text — "cho phép nhập trường chưa có trong Master." Same
+  /// optional-link-never-a-duplicate-row idiom as `PartnerProgram.programId`.
+  schoolMasterId     String?       @map("school_master_id")
+  schoolMaster       SchoolMaster? @relation(fields: [schoolMasterId], references: [id])
   /// Free text (e.g. "Grade 11, 2024–2025", "Fall 2024") — school terms/calendars vary too
   /// widely for a fixed enum, same "configurable, not hard-coded" precedent as `Case.stage`.
   period             String
@@ -989,17 +1098,36 @@ model AcademicRecord {
   /// field distinct from `period`'s free-text term/year. Nullable at the schema level;
   /// required-ness enforced stage-aware — see AssessmentsService.assertStudentProfileComplete.
   grade              String?
-  gpa                Decimal?  @db.Decimal(5, 2)
-  gradingScale       String?   @map("grading_scale")
-  evidenceDocumentId String?   @map("evidence_document_id")
-  evidenceDocument   Document? @relation("AcademicRecordEvidence", fields: [evidenceDocumentId], references: [id])
-  verifiedById       String?   @map("verified_by_id")
-  verifiedAt         DateTime? @map("verified_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  gpa                Decimal?      @db.Decimal(5, 2)
+  gradingScale       String?       @map("grading_scale")
+  evidenceDocumentId String?       @map("evidence_document_id")
+  evidenceDocument   Document?     @relation("AcademicRecordEvidence", fields: [evidenceDocumentId], references: [id])
+  verifiedById       String?       @map("verified_by_id")
+  verifiedAt         DateTime?     @map("verified_at")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
 
   @@index([caseId])
   @@map("academic_records")
+}
+
+/// Client Acceptance Remediation DEC-05(b) (2026-08-27) — a curated, staff-maintained list of
+/// domestic schools for `AcademicRecord.school` to optionally link against ("ưu tiên School
+/// Master, cho phép nhập trường chưa có"). Deliberately minimal (no business-code ID — not a
+/// client-mandated sheet18/20 format) and deliberately NOT part of the `admission/master-data`
+/// module (University/Program/ScholarshipMaster) — that set is the client's own grouped
+/// outbound-admissions catalog (01_MASTER_DATA.md); this is an unrelated domestic-school list
+/// scoped to Student Profile only.
+model SchoolMaster {
+  id        String           @id @default(uuid())
+  name      String           @unique
+  status    MasterDataStatus @default(ACTIVE)
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  academicRecords AcademicRecord[]
+
+  @@map("school_masters")
 }
 
 /// SRS 6.7. One row per attempt — a new attempt is always a new row, the previous
@@ -1101,6 +1229,7 @@ model Activity {
   endAt              DateTime? @map("end_at")
   hours              Decimal?  @db.Decimal(6, 1)
   impact             String?
+  award              String?
   verifierName       String?   @map("verifier_name")
   verifiedById       String?   @map("verified_by_id")
   verifiedAt         DateTime? @map("verified_at")
@@ -1682,6 +1811,10 @@ model Visa {
   internalNotes            String?    @map("internal_notes")
   createdAt                DateTime   @default(now()) @map("created_at")
   updatedAt                DateTime   @updatedAt @map("updated_at")
+
+  /// Client Acceptance Remediation DEC-09 (2026-08-27) — back-relation for
+  /// `CommissionTransaction.visaId`.
+  commissionTransactions CommissionTransaction[]
 
   @@index([studentId])
   @@index([caseId])
@@ -2278,6 +2411,14 @@ model CommissionTransaction {
   /// stays queryable even when the source is a Payment (Payment.contractId one hop away).
   contractId       String?                     @map("contract_id")
   contract         Contract?                   @relation(fields: [contractId], references: [id])
+  /// Client Acceptance Remediation DEC-09 (2026-08-27) — the Visa leg of the same
+  /// GAP-006/REQ-PARTNER-008 traceability requirement `contractId` above already covers for
+  /// Contract/Payment. Client-confirmed: mandatory for commissions that originate from a
+  /// Visa outcome, absent for every other source — enforced by `resolveSource()` always
+  /// populating this when `sourceType==='Visa'` (same auto-resolution mechanism as
+  /// `contractId`), never by a separate conditional-validation layer.
+  visaId           String?                     @map("visa_id")
+  visa             Visa?                       @relation(fields: [visaId], references: [id])
   sourceType       String                      @map("source_type")
   sourceId         String?                     @map("source_id")
   basis            CommissionBasis?
@@ -2296,6 +2437,7 @@ model CommissionTransaction {
   @@index([status])
   @@index([sourceType, sourceId])
   @@index([contractId])
+  @@index([visaId])
   @@map("commission_transactions")
 }
 

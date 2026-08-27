@@ -20,7 +20,6 @@ const casesApi = vi.hoisted(() => ({
   getCase: vi.fn(),
   updateCaseStage: vi.fn(),
   updateCaseStatus: vi.fn(),
-  closeCase: vi.fn(),
   listCaseMembers: vi.fn(),
   addCaseMember: vi.fn(),
   removeCaseMember: vi.fn(),
@@ -49,7 +48,7 @@ function makeCase(overrides: Partial<Case> = {}): Case {
     ownerId: "owner-1",
     owner: { id: "owner-1", username: "consultant1", fullName: "Nguyễn Tư Vấn" },
     department: "Tư vấn",
-    stage: "DISCOVERY",
+    stage: "ASSESSMENT",
     status: "OPEN",
     closureReason: null,
     openedAt: "2026-01-01T00:00:00.000Z",
@@ -92,6 +91,10 @@ describe("CaseDetailPage", () => {
     expect(await screen.findByText("C-0001")).toBeInTheDocument();
     expect(screen.getByText("Phạm Văn C")).toBeInTheDocument();
     expect(screen.getAllByText("Nguyễn Tư Vấn").length).toBeGreaterThan(0);
+    // REQ-CASE-016 (sheet08 controlled enum) — the Vietnamese label renders, never the raw enum key.
+    // ("Giai đoạn" also appears as the button label that opens the stage dialog, so scope to the <dt>.)
+    expect(screen.getByText("Giai đoạn", { selector: "dt" }).nextElementSibling).toHaveTextContent("Assessment");
+    expect(screen.queryByText("ASSESSMENT")).not.toBeInTheDocument();
   });
 
   it("shows the exact 404-non-enumeration copy for an out-of-scope/nonexistent case", async () => {
@@ -105,7 +108,7 @@ describe("CaseDetailPage", () => {
     expect(await screen.findByText("Không tìm thấy hoặc bạn không có quyền truy cập.")).toBeInTheDocument();
   });
 
-  it("hides Giai đoạn/Chuyển trạng thái/Đổi chủ sở hữu/Đóng case/+ Thêm for DOCUMENT_SPECIALIST (cases:view only — RBAC hidden actions)", async () => {
+  it("hides Giai đoạn/Chuyển trạng thái/Đổi chủ sở hữu/Đóng hồ sơ/+ Thêm for DOCUMENT_SPECIALIST (cases:view only — RBAC hidden actions)", async () => {
     authState.principal = { userId: "u1", roleCode: "DOCUMENT_SPECIALIST" };
     casesApi.getCase.mockResolvedValue(makeCase());
     casesApi.listCaseMembers.mockResolvedValue([makeMember()]);
@@ -116,7 +119,8 @@ describe("CaseDetailPage", () => {
     expect(screen.queryByRole("button", { name: "Giai đoạn" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Chuyển trạng thái" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Đổi chủ sở hữu" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Đóng case" })).not.toBeInTheDocument();
+    // DEC-06 (2026-08-26) — DOCUMENT_SPECIALIST holds no `case-closure:*` grant at all.
+    expect(screen.queryByRole("button", { name: "Đóng hồ sơ" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "+ Thêm" })).not.toBeInTheDocument();
   });
 
@@ -136,21 +140,16 @@ describe("CaseDetailPage", () => {
     await waitFor(() => expect(casesApi.updateCaseStatus).toHaveBeenCalledWith("case-1", "ACTIVE"));
   });
 
-  it("surfaces a failing close precondition (OPEN_TASKS_REMAIN) verbatim, never a generic message", async () => {
+  // Closure preconditions/checklist/role-gating now live entirely on the unified
+  // `/cases/:id/closure` page — see `closure/page.test.tsx`, not this file.
+  it("shows an 'Đóng hồ sơ' link for a role with case-closure access (CONSULTANT, request-only)", async () => {
     authState.principal = { userId: "u1", roleCode: "CONSULTANT" };
     casesApi.getCase.mockResolvedValue(makeCase());
     casesApi.listCaseMembers.mockResolvedValue([]);
-    casesApi.closeCase.mockRejectedValue(
-      new ApiError(409, { error: { code: "OPEN_TASKS_REMAIN", message: "tasks remain", requestId: "r1" } }),
-    );
 
     renderDetail();
     await screen.findByText("C-0001");
 
-    await userEvent.click(screen.getByRole("button", { name: "Đóng case" }));
-    await userEvent.type(screen.getByLabelText("Lý do đóng case *"), "Hoàn tất");
-    await userEvent.click(screen.getByRole("button", { name: "Xác nhận đóng case" }));
-
-    expect(await screen.findByText("Còn task chưa hoàn thành — không thể đóng case.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Đóng hồ sơ" })).toBeInTheDocument();
   });
 });

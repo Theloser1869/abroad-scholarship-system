@@ -113,18 +113,24 @@ describe('RBAC allow/deny (e2e)', () => {
     });
   });
 
-  describe('NONE scope (SALES_MARKETING, ADMIN_FINANCE, SYSTEM_ADMIN have no students/cases grant)', () => {
-    it.each(['demo.sales', 'demo.finance'])('%s is denied at the permission layer (403), never reaches scope evaluation', async (username) => {
+  describe('NONE scope on students (SALES_MARKETING, ADMIN_FINANCE hold view-only students:view per the client permission matrix, but NONE record-scope; SYSTEM_ADMIN has no grant at all)', () => {
+    /// Client permission-matrix remediation (2026-08-25) granted SALES_MARKETING/
+    /// ADMIN_FINANCE a view-only `students:view` permission (sheet03 Phan_quyen_module:
+    /// both = "Hạn chế", previously mis-seeded as zero) — but their record-SCOPE for
+    /// Student stays `ScopeKind.NONE` (`scope-policy.service.ts` `ROLE_SCOPE`, unchanged).
+    /// So the permission GUARD now passes (no longer 403), and the caller is denied at the
+    /// scope layer instead — 404, per AC-02 ("a 403 would confirm the record exists").
+    it.each(['demo.sales', 'demo.finance'])('%s passes the permission guard (students:view) but is denied at the NONE scope layer (404)', async (username) => {
       const token = await tokenFor(username);
       const res = await request(app.getHttpServer()).get(`/students/${studentAId}`).set('Authorization', `Bearer ${token}`);
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('PERMISSION_DENIED');
+      expect(res.status).toBe(404);
     });
 
-    it('SYSTEM_ADMIN is also denied students access — identity admin does not imply business-data access (SRS section 3)', async () => {
+    it('SYSTEM_ADMIN is denied at the permission layer (403) — identity admin does not imply business-data access (SRS section 3), and it holds no students grant at all', async () => {
       const token = await tokenFor('admin');
       const res = await request(app.getHttpServer()).get(`/students/${studentAId}`).set('Authorization', `Bearer ${token}`);
       expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('PERMISSION_DENIED');
     });
   });
 

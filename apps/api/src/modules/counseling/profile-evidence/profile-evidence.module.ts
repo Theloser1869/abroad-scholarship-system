@@ -11,12 +11,14 @@ import {
   CaseTestRecordsController,
   CompetitionsController,
   ResearchProjectsController,
+  SchoolMastersController,
   TestRecordsController,
 } from './profile-evidence.controller';
 import { AcademicRecordsService } from './academic-records.service';
 import { ActivitiesService } from './activities.service';
 import { CompetitionsService } from './competitions.service';
 import { ResearchProjectsService } from './research-projects.service';
+import { SchoolMastersService } from './school-masters.service';
 import { TestRecordsService } from './test-records.service';
 
 @Module({
@@ -24,6 +26,7 @@ import { TestRecordsService } from './test-records.service';
   controllers: [
     CaseAcademicRecordsController,
     AcademicRecordsController,
+    SchoolMastersController,
     CaseTestRecordsController,
     TestRecordsController,
     CaseCompetitionsController,
@@ -33,6 +36,6 @@ import { TestRecordsService } from './test-records.service';
     CaseActivitiesController,
     ActivitiesController,
   ],
-  providers: [AcademicRecordsService, TestRecordsService, CompetitionsService, ResearchProjectsService, ActivitiesService],
+  providers: [AcademicRecordsService, SchoolMastersService, TestRecordsService, CompetitionsService, ResearchProjectsService, ActivitiesService],
 })
 export class ProfileEvidenceModule {}

@@ -16,6 +16,9 @@ const contractsApi = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/contracts/api", () => contractsApi);
 
+const studentsApi = vi.hoisted(() => ({ listStudents: vi.fn() }));
+vi.mock("@/lib/students/api", () => studentsApi);
+
 beforeEach(() => {
   vi.resetAllMocks();
 });
@@ -26,6 +29,7 @@ function makeContract(overrides: Partial<Contract> = {}): Contract {
     contractCode: "HD-2026-00001",
     studentId: "student-1",
     student: { id: "student-1", studentCode: "HS-2026-00001", fullName: "Trần Văn A" },
+    caseId: null,
     templateId: null,
     mergeFieldValues: null,
     servicePackage: "Gói toàn diện",
@@ -102,16 +106,23 @@ describe("ContractsPage (list)", () => {
   });
 
   it("creates a contract via the dialog and calls createContract with the entered fields", async () => {
+    // ADMIN_FINANCE now holds view-only `students:view` (client permission-matrix
+    // remediation, 2026-08-25) — StudentPicker renders its real search/select UI, not the
+    // manual-UUID-input fallback (see StudentPicker's own doc comment).
     authState.principal = { userId: "u1", roleCode: "ADMIN_FINANCE" };
     contractsApi.listContracts.mockResolvedValue({ data: [], meta: { page: 1, limit: 20, totalItems: 0, totalPages: 0 } });
     contractsApi.createContract.mockResolvedValue(makeContract());
+    studentsApi.listStudents.mockResolvedValue({
+      data: [{ id: "student-9", studentCode: "HS-2026-00009", fullName: "Nguyễn Văn Chín" }],
+      meta: { page: 1, limit: 10, totalItems: 1, totalPages: 1 },
+    });
 
     renderWithProviders(<ContractsPage />);
     await screen.findByText("Không có hợp đồng nào.");
 
     await userEvent.click(screen.getByRole("button", { name: "+ Tạo hợp đồng" }));
-    // ADMIN_FINANCE has no students:view grant — StudentPicker degrades to a manual UUID input.
-    await userEvent.type(screen.getByLabelText("Học sinh (Student ID)"), "student-9");
+    await userEvent.type(screen.getByPlaceholderText("Tìm theo tên hoặc mã học sinh..."), "Chín");
+    await userEvent.click(await screen.findByRole("button", { name: /Nguyễn Văn Chín/ }));
     await userEvent.type(screen.getByLabelText("Giá trị *"), "3000");
     await userEvent.clear(screen.getByLabelText("Tiền tệ *"));
     await userEvent.type(screen.getByLabelText("Tiền tệ *"), "USD");

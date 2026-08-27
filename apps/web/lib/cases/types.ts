@@ -5,10 +5,48 @@ import type { UserSummary } from "../api/types";
 
 export type CaseStatus = "OPEN" | "ACTIVE" | "ON_HOLD" | "COMPLETED" | "CLOSED" | "ARCHIVED";
 
-/// Manual transitions only — CLOSED is reachable only via `PATCH /cases/:id/close`.
+/// Manual transitions only — CLOSED is reachable only via the unified Closure workflow
+/// (`POST /cases/:id/closure/close` — see `lib/closure/api.ts`).
 export const MANUAL_CASE_STATUSES: CaseStatus[] = ["OPEN", "ACTIVE", "ON_HOLD", "COMPLETED", "ARCHIVED"];
 
 export type CaseMemberRole = "OWNER" | "COLLABORATOR";
+
+/// REQ-CASE-016 (2026-08-26) — sheet08 (Case_Workflow)'s 15-stage narrative, mirrors the
+/// Prisma `CaseStage` enum exactly. Previously free text.
+export type CaseStage =
+  | "LEAD_TO_CONTRACT"
+  | "CONTRACT_SIGNING"
+  | "ASSESSMENT"
+  | "ROADMAP"
+  | "PROFILE_DEVELOPMENT"
+  | "WRITING"
+  | "SCHOOL_SELECTION"
+  | "APPLICATION"
+  | "OFFER"
+  | "SCHOLARSHIP"
+  | "VISA"
+  | "PRE_DEPARTURE"
+  | "ENROLLMENT"
+  | "CLOSURE"
+  | "ARCHIVE";
+
+export const CASE_STAGES: CaseStage[] = [
+  "LEAD_TO_CONTRACT",
+  "CONTRACT_SIGNING",
+  "ASSESSMENT",
+  "ROADMAP",
+  "PROFILE_DEVELOPMENT",
+  "WRITING",
+  "SCHOOL_SELECTION",
+  "APPLICATION",
+  "OFFER",
+  "SCHOLARSHIP",
+  "VISA",
+  "PRE_DEPARTURE",
+  "ENROLLMENT",
+  "CLOSURE",
+  "ARCHIVE",
+];
 
 export interface StudentSummary {
   id: string;
@@ -25,7 +63,7 @@ export interface Case {
   ownerId: string;
   owner: UserSummary;
   department: string | null;
-  stage: string;
+  stage: CaseStage;
   status: CaseStatus;
   closureReason: string | null;
   openedAt: string;
@@ -54,7 +92,7 @@ export interface CaseListParams {
 }
 
 export interface UpdateCaseStageInput {
-  stage: string;
+  stage: CaseStage;
   department?: string;
 }
 

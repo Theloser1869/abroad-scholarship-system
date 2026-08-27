@@ -507,11 +507,14 @@ describe('Tasks (e2e)', () => {
     });
 
     it('CASE_STAGE_CHANGED: fires only for the configured stage value, and only once per case (idempotent on repeat)', async () => {
-      const template = await createTemplate({ triggerEvent: 'CASE_STAGE_CHANGED', triggerStageValue: 'e2e_stage_marker', code: `TT-STAGE-${randomUUID()}` });
+      // `Case.stage` is now a controlled enum (REQ-CASE-016) — the target value here must be
+      // one of the real sheet08 stages; `TaskTemplate.triggerStageValue` itself stays free-text
+      // (a separate, unchanged admin-config matcher field) but must be set to the SAME value.
+      const template = await createTemplate({ triggerEvent: 'CASE_STAGE_CHANGED', triggerStageValue: 'VISA', code: `TT-STAGE-${randomUUID()}` });
       try {
         const { caseId } = await createStudentWithCase(app, salesToken);
 
-        await request(app.getHttpServer()).patch(`/cases/${caseId}/stage`).set('Authorization', `Bearer ${directorToken}`).send({ stage: 'e2e_stage_marker' });
+        await request(app.getHttpServer()).patch(`/cases/${caseId}/stage`).set('Authorization', `Bearer ${directorToken}`).send({ stage: 'VISA' });
         const afterFirst = await prisma.task.count({ where: { templateId: template.id, sourceEntityId: caseId } });
         expect(afterFirst).toBe(1);
 
@@ -519,7 +522,7 @@ describe('Tasks (e2e)', () => {
         // template (other active templates, e.g. from the CASE_CREATED test above, may
         // independently also generate their own task for this case — irrelevant here
         // since we count only tasks traceable to this specific template).
-        await request(app.getHttpServer()).patch(`/cases/${caseId}/stage`).set('Authorization', `Bearer ${directorToken}`).send({ stage: 'e2e_stage_marker' });
+        await request(app.getHttpServer()).patch(`/cases/${caseId}/stage`).set('Authorization', `Bearer ${directorToken}`).send({ stage: 'VISA' });
         const afterSecond = await prisma.task.count({ where: { templateId: template.id, sourceEntityId: caseId } });
         expect(afterSecond).toBe(1);
       } finally {

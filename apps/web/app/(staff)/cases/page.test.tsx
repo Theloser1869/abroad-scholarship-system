@@ -38,7 +38,7 @@ function makeCase(overrides: Partial<Case> = {}): Case {
     ownerId: "owner-1",
     owner: { id: "owner-1", username: "consultant1", fullName: "Nguyễn Tư Vấn" },
     department: "Tư vấn",
-    stage: "DISCOVERY",
+    stage: "ASSESSMENT",
     status: "OPEN",
     closureReason: null,
     openedAt: "2026-01-01T00:00:00.000Z",

@@ -60,18 +60,6 @@ export function useUpdateCaseStatus(id: string) {
   });
 }
 
-export function useCloseCase(id: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (closureReason: string) => casesApi.closeCase(id, closureReason),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.cases.detail(id) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.cases.lists() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.cases.timeline(id) });
-    },
-  });
-}
-
 export function useAddCaseMember(id: string) {
   const queryClient = useQueryClient();
   return useMutation({

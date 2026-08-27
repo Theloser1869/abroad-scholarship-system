@@ -114,9 +114,9 @@ describe('Visa (e2e)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('ADMIN_FINANCE has zero visa grant (403) — "không mặc định được sửa visa counseling data"', async () => {
+    it('ADMIN_FINANCE holds view-only visa:view (client permission-matrix remediation, 2026-08-25) but is still denied at the Case NONE-scope layer (404)', async () => {
       const res = await request(app.getHttpServer()).get(`/visas/${visaAId}`).set('Authorization', `Bearer ${financeToken}`);
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
     });
 
     it('does not create a new Student/Case — Visa only links an existing Case', async () => {

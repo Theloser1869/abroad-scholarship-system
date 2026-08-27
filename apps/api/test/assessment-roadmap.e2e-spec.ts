@@ -93,9 +93,11 @@ describe('Assessment + Roadmap (e2e)', () => {
     await app.close();
   });
 
-  /// Client Acceptance Remediation GAP-004/GAP-005 (HIGH) — 04_Student_Profile marks DOB,
-  /// target country/major/intake, scholarship goal, grade, and GPA all "Bắt buộc".
-  /// docs/ASSUMPTIONS.md ASM-90: enforced at Assessment approval, not Student creation.
+  /// Client Acceptance Remediation GAP-004/GAP-005 (RESOLVED 2026-08-25) — 04_Student_Profile
+  /// marks DOB, target country/major/intake, scholarship goal, and grade all "Bắt buộc".
+  /// docs/ASSUMPTIONS.md ASM-90: enforced at Assessment approval, not Student creation. GPA is
+  /// deliberately NOT required here — client decision 2026-08-25 (CONFLICT-004): GPA is
+  /// Optional, not "Bắt buộc" (sheet17's reading wins over sheet04's).
   describe('Assessment approval requires a complete Student profile (GAP-004/GAP-005)', () => {
     async function incompleteCase() {
       const { studentId, caseId } = await createStudentWithCase(app, salesToken);
@@ -123,17 +125,18 @@ describe('Assessment + Roadmap (e2e)', () => {
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('STUDENT_PROFILE_INCOMPLETE');
       expect(res.body.error.missingFields).toEqual(
-        expect.arrayContaining(['dateOfBirth', 'targetCountry', 'targetMajor', 'targetIntake', 'scholarshipGoal', 'academicRecord (grade + GPA)']),
+        expect.arrayContaining(['dateOfBirth', 'targetCountry', 'targetMajor', 'targetIntake', 'scholarshipGoal', 'academicRecord (grade)']),
       );
     });
 
-    it('denies approval when Student fields are set but no AcademicRecord has both grade and GPA', async () => {
+    it('denies approval when Student fields are set but no AcademicRecord has a grade', async () => {
       const { studentId, caseId } = await incompleteCase();
       await request(app.getHttpServer())
         .patch(`/students/${studentId}`)
         .set('Authorization', `Bearer ${directorToken}`)
         .send({ dateOfBirth: '2008-01-01', targetCountry: 'UK', targetMajor: 'Economics', targetIntake: 'Fall 2027', scholarshipGoal: 'Partial scholarship' });
-      // Academic record created WITHOUT grade — still incomplete.
+      // Academic record created WITHOUT grade (GPA present) — still incomplete: grade is the
+      // only academic-record field this gate requires, GPA is Optional (CONFLICT-004).
       await request(app.getHttpServer())
         .post(`/cases/${caseId}/academic-records`)
         .set('Authorization', `Bearer ${directorToken}`)
@@ -143,19 +146,21 @@ describe('Assessment + Roadmap (e2e)', () => {
       const res = await request(app.getHttpServer()).post(`/assessments/${assessmentId}/approve`).set('Authorization', `Bearer ${directorToken}`).send({});
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('STUDENT_PROFILE_INCOMPLETE');
-      expect(res.body.error.missingFields).toEqual(['academicRecord (grade + GPA)']);
+      expect(res.body.error.missingFields).toEqual(['academicRecord (grade)']);
     });
 
-    it('allows approval once every required Student field and a grade+GPA academic record are present', async () => {
+    it('allows approval once every required Student field and a graded academic record are present, even with no GPA (GAP-027)', async () => {
       const { studentId, caseId } = await incompleteCase();
       await request(app.getHttpServer())
         .patch(`/students/${studentId}`)
         .set('Authorization', `Bearer ${directorToken}`)
         .send({ dateOfBirth: '2008-01-01', targetCountry: 'CA', targetMajor: 'Biology', targetIntake: 'Fall 2027', scholarshipGoal: 'Need-based aid' });
+      // No `gpa` sent — GPA is Optional (CONFLICT-004, client decision 2026-08-25); grade alone
+      // must be sufficient for this gate.
       await request(app.getHttpServer())
         .post(`/cases/${caseId}/academic-records`)
         .set('Authorization', `Bearer ${directorToken}`)
-        .send({ school: 'Some School', period: '2026-2027', grade: 'Grade 12', gpa: 3.9 });
+        .send({ school: 'Some School', period: '2026-2027', grade: 'Grade 12' });
 
       const assessmentId = await draftToReview(caseId);
       const res = await request(app.getHttpServer()).post(`/assessments/${assessmentId}/approve`).set('Authorization', `Bearer ${directorToken}`).send({});

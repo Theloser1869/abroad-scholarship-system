@@ -8,18 +8,27 @@ import type { StudentSummary } from "../cases/types";
 
 export type ContractStatus = "DRAFT" | "REVIEW" | "APPROVED" | "SENT" | "SIGNED" | "ACTIVE" | "COMPLETED" | "LIQUIDATED" | "ARCHIVED";
 
-/// `PATCH /contracts/:id/status` only accepts these four (`UpdateContractStatusDto`) — every
+/// `PATCH /contracts/:id/status` accepts these targets (`UpdateContractStatusDto`) — every
 /// earlier transition (submit/approve/reject/send/sign) is its own dedicated endpoint, never
 /// reachable through this one (F04 instruction §8: "Không cho frontend PATCH status trực tiếp
-/// nếu backend có dedicated endpoint").
-export type ManualContractStatus = "ACTIVE" | "COMPLETED" | "LIQUIDATED" | "ARCHIVED";
-export const MANUAL_CONTRACT_STATUSES: ManualContractStatus[] = ["ACTIVE", "COMPLETED", "LIQUIDATED", "ARCHIVED"];
+/// nếu backend có dedicated endpoint"). Client Acceptance Remediation DEC-06 (2026-08-26) —
+/// COMPLETED/LIQUIDATED are no longer reachable through this route once a Case is linked
+/// (always true post-SIGNED — see `ContractsService.updateStatus`'s `USE_UNIFIED_CLOSURE_
+/// WORKFLOW` guard); only ACTIVE/ARCHIVED remain manually selectable here. Hoàn tất/Thanh
+/// lý now go through the unified `/cases/:id/closure` workflow (`lib/closure/api.ts`).
+export type ManualContractStatus = "ACTIVE" | "ARCHIVED";
+export const MANUAL_CONTRACT_STATUSES: ManualContractStatus[] = ["ACTIVE", "ARCHIVED"];
 
 export interface Contract {
   id: string;
   contractCode: string;
   studentId: string;
   student: StudentSummary;
+  /** Client Acceptance Remediation DEC-06 (2026-08-26) — ID-only pointer to the linked Case
+   * (never full Case data — see `ContractsService.getById`'s own comment), used only to
+   * link to the unified `/cases/:id/closure` workflow once this contract is post-SIGNED.
+   * Only populated by the detail endpoint (`getContract`) — absent from list rows. */
+  caseId?: string | null;
   templateId: string | null;
   mergeFieldValues: Record<string, unknown> | null;
   servicePackage: string | null;

@@ -13,13 +13,20 @@ const CODE_MESSAGES: Record<string, string> = {
   CASE_NOT_FOUND: "Không tìm thấy case.",
   STUDENT_NOT_FOUND: "Không tìm thấy học sinh.",
   DUPLICATE_ACTIVE_CASE: "Học sinh này đã có case đang hoạt động.",
-  STUDENT_PROFILE_INCOMPLETE: "Hồ sơ học sinh còn thiếu thông tin bắt buộc (ngày sinh, quốc gia/ngành/đợt mục tiêu, mục tiêu học bổng, hoặc lớp/GPA) — cần bổ sung trước khi duyệt đánh giá.",
+  STUDENT_PROFILE_INCOMPLETE: "Hồ sơ học sinh còn thiếu thông tin bắt buộc (ngày sinh, quốc gia/ngành/đợt mục tiêu, mục tiêu học bổng, hoặc lớp) — cần bổ sung trước khi duyệt đánh giá.",
   INVALID_STATUS_TRANSITION: "Không thể chuyển sang trạng thái này từ trạng thái hiện tại.",
   OPEN_TASKS_REMAIN: "Còn task chưa hoàn thành — không thể đóng case.",
   OUTSTANDING_DEBT_REMAINS: "Còn công nợ chưa thanh toán — cần xử lý trước khi tiếp tục.",
   VISA_IN_PROGRESS: "Hồ sơ visa đang xử lý — không thể đóng case.",
   ENROLLMENT_NOT_CONFIRMED: "Chưa xác nhận nhập học — không thể đóng case.",
   PRE_DEPARTURE_CHECKLIST_INCOMPLETE: "Checklist trước khi khởi hành chưa hoàn tất — không thể đóng case.",
+  // Client Acceptance Remediation DEC-06/07/08 (GAP-007) — unified Closure/Liquidation
+  // workflow (apps/api/src/modules/case-management/closure).
+  DOCUMENT_HANDOVER_INCOMPLETE: "Chưa xác nhận bàn giao tài liệu — cần xác nhận trước khi đóng hồ sơ.",
+  OVERRIDE_REASON_REQUIRED: "Trưởng phòng/Giám đốc điều hành cần nhập lý do xử lý ngoại lệ (exception) trước khi thực hiện thay HCTH.",
+  CASE_NOT_CLOSED: "Chỉ có thể xác nhận thanh lý sau khi hồ sơ đã được đóng.",
+  ALREADY_LIQUIDATED: "Hồ sơ đã được thanh lý — không thể xác nhận lại (bất biến).",
+  USE_UNIFIED_CLOSURE_WORKFLOW: "Hợp đồng này đã liên kết với một case — vui lòng thực hiện Hoàn tất/Thanh lý qua luồng Đóng hồ sơ hợp nhất của case, không qua hợp đồng trực tiếp.",
   CASE_MEMBER_NOT_FOUND: "Người dùng này không phải thành viên đang hoạt động của case.",
   PERMISSION_DENIED: "Chỉ chủ sở hữu case (hoặc vai trò GLOBAL) mới có quyền thao tác này.",
   VALIDATION_ERROR: "Dữ liệu nhập không hợp lệ.",
@@ -32,7 +39,7 @@ const CODE_MESSAGES: Record<string, string> = {
   CASE_ALREADY_LINKED: "Case này đã liên kết với một hợp đồng khác.",
   CONTRACT_NOT_YET_SIGNED: "Hợp đồng chưa được ký — chưa thể thực hiện thao tác này.",
   NO_MATERIAL_CHANGE: "Không có thay đổi thực sự nào so với điều khoản hiện tại.",
-  PAYMENT_REQUIRED_FOR_ACTIVATION: "Hợp đồng chưa ghi nhận khoản thanh toán nào — cần ghi nhận ít nhất một khoản thanh toán trước khi kích hoạt.",
+  PAYMENT_REQUIRED_FOR_ACTIVATION: "Cần thanh toán tối thiểu 30% giá trị hợp đồng trước khi kích hoạt (DEC-01).",
   CLOSURE_REASON_REQUIRED: "Cần nhập lý do/biên bản thanh lý trước khi thanh lý hợp đồng.",
 
   // F04 — Payment (apps/api/src/modules/commercial/payments)

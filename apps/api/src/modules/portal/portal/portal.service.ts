@@ -7,6 +7,7 @@ import { ApplicationQueryDto } from '../../admission/applications/dto/applicatio
 import { ApplicationsService } from '../../admission/applications/applications.service';
 import { OffersService } from '../../admission/offers/offers.service';
 import { ScholarshipApplicationsService } from '../../admission/scholarship-applications/scholarship-applications.service';
+import { ClosureService } from '../../case-management/closure/closure.service';
 import { ContractQueryDto } from '../../commercial/contracts/dto/contract-query.dto';
 import { ContractsService } from '../../commercial/contracts/contracts.service';
 import { PaymentQueryDto } from '../../commercial/payments/dto/payment-query.dto';
@@ -55,6 +56,7 @@ export class PortalService {
     private readonly contracts: ContractsService,
     private readonly payments: PaymentsService,
     private readonly notifications: NotificationsService,
+    private readonly closure: ClosureService,
   ) {}
 
   /// Resolves + verifies `studentId` (never trusted from the client without this) then
@@ -84,6 +86,30 @@ export class PortalService {
     await this.scope.assertStudentAccessible(principal, studentId);
     const student = await this.prisma.student.findUniqueOrThrow({ where: { id: studentId } });
     return this.fieldPolicy.redactStudent(student, principal.roleCode);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Closure / Liquidation (Client Acceptance Remediation DEC-06/07/08)
+  // ---------------------------------------------------------------------------
+
+  /// Read-only — student/parent-safe summary only. `handover.notes` may carry internal
+  /// staff commentary (per 11-portal's "no internal notes/audit data" rule, same as
+  /// `internalNotes` on Visa/LOR/ScholarshipApplication), so it is stripped here; every
+  /// other field is already safe (checklist keys/status, handover status/date, liquidation
+  /// confirmation status/dates — no actor names/ids, no financial figures).
+  async getClosure(principal: Principal, studentId: string) {
+    const { caseId } = await this.resolveCase(principal, studentId);
+    const status = await this.closure.getStatusForCase(caseId);
+    return { ...status, handover: { ...status.handover, notes: null } };
+  }
+
+  /// DEC-08 — student/parent side of the two-party liquidation confirmation.
+  /// `resolveCase` above already re-verifies this principal is the Student themselves or an
+  /// ACTIVE linked Parent (`assertStudentAccessible`, revocation-aware) before this is
+  /// ever reached — the same defense-in-depth every other portal mutation relies on.
+  async confirmLiquidation(principal: Principal, studentId: string) {
+    const { caseId } = await this.resolveCase(principal, studentId);
+    return this.closure.confirmLiquidationStudentParent(caseId, principal);
   }
 
   // ---------------------------------------------------------------------------

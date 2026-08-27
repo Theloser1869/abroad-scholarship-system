@@ -1,16 +1,13 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Case, CaseMember, CaseStatus, Prisma } from '@prisma/client';
+import { Case, CaseMember, CaseStage, CaseStatus, Prisma } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult, parseSort } from '../../../common/dto/list-query.dto';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { PaymentsService } from '../../commercial/payments/payments.service';
 import { ScopeKind, ScopePolicyService } from '../../identity/rbac/scope-policy.service';
-import { VisaStatusService } from '../../visa/visa-status/visa-status.service';
 import { TaskGenerationService } from '../tasks/task-generation.service';
 import { AddCaseMemberDto } from './dto/add-case-member.dto';
 import { CaseQueryDto } from './dto/case-query.dto';
-import { CloseCaseDto } from './dto/close-case.dto';
 import { CreateCaseDto } from './dto/create-case.dto';
 import { UpdateCaseStageDto } from './dto/update-case-stage.dto';
 
@@ -38,9 +35,10 @@ export type CaseMemberWithUser = CaseMember & { user: { id: string; username: st
 /// case isolation applies to writes exactly as it does to reads, per this phase's
 /// explicit "Cross-case isolation is mandatory."
 ///
-/// SRS section 9 status machine — CLOSED is reachable only through `close()` (closure
-/// reason required, open-task guard), matching how Lead's CONVERTED is reachable only
-/// through `LeadsService.convert()`.
+/// SRS section 9 status machine — CLOSED is reachable only through the unified
+/// `ClosureService.close()` (Client Acceptance Remediation DEC-06/07/08, GAP-007), matching
+/// how Lead's CONVERTED is reachable only through `LeadsService.convert()`. This map's own
+/// `updateStatus()` below explicitly excludes CLOSED from its allowed target set.
 const CASE_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   OPEN: ['ACTIVE', 'ON_HOLD'],
   ACTIVE: ['ON_HOLD', 'COMPLETED'],
@@ -50,8 +48,6 @@ const CASE_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   ARCHIVED: [],
 };
 
-const CLOSABLE_FROM: CaseStatus[] = ['OPEN', 'ACTIVE', 'ON_HOLD', 'COMPLETED'];
-
 @Injectable()
 export class CasesService {
   constructor(
@@ -59,8 +55,6 @@ export class CasesService {
     private readonly scope: ScopePolicyService,
     private readonly idGenerator: IdGeneratorService,
     private readonly taskGeneration: TaskGenerationService,
-    private readonly payments: PaymentsService,
-    private readonly visaStatus: VisaStatusService,
   ) {}
 
   async list(principal: Principal, query: CaseQueryDto): Promise<PaginatedResult<CaseWithRelations>> {
@@ -125,7 +119,7 @@ export class CasesService {
     const ownerId = dto.ownerId ?? principal.userId;
     const caseCode = await this.idGenerator.nextYearlyCode('CASE');
     const created = await this.prisma.case.create({
-      data: { caseCode, studentId, ownerId, stage: dto.stage ?? 'intake', department: dto.department },
+      data: { caseCode, studentId, ownerId, stage: dto.stage ?? CaseStage.CONTRACT_SIGNING, department: dto.department },
     });
     await this.prisma.caseMember.create({ data: { caseId: created.id, userId: ownerId, role: 'OWNER' } });
     await this.taskGeneration.generateForEvent({
@@ -165,71 +159,6 @@ export class CasesService {
       });
     }
     return this.prisma.case.update({ where: { id }, data: { status: newStatus } });
-  }
-
-  /// "Closure checks" (04-core-crm/02_STUDENT_CASE.md, extended by 09-visa/
-  /// 02_PRE_DEPARTURE_ENROLLMENT.md's "Closure requires: valid completion/reason, payment
-  /// state handled, critical tasks resolved, enrollment/closure evidence as applicable").
-  /// Closure reason is mandatory (SRS section 9) and enforced via CloseCaseDto. This
-  /// single domain-level validation method is the ONLY path to CLOSED — never a bare
-  /// status PATCH, and never re-implemented in a Visa/Enrollment controller (both of those
-  /// only ever expose read-only status-check services, `PaymentsService.
-  /// hasOutstandingDebtForCase`/`VisaStatusService.*`, called from here — "sử dụng Case
-  /// service/state transition hiện tại," "không tính outstanding amount theo một
-  /// implementation thứ hai"). Each precondition is its own guard, not folded into a single
-  /// combined check, so a caller always learns the SPECIFIC blocking reason.
-  async close(principal: Principal, id: string, dto: CloseCaseDto): Promise<Case> {
-    const record = await this.assertManageable(principal, id);
-    if (!CLOSABLE_FROM.includes(record.status)) {
-      throw new ConflictException({
-        code: 'INVALID_STATUS_TRANSITION',
-        message: `Cannot close a Case in status ${record.status}.`,
-      });
-    }
-
-    const openTaskCount = await this.prisma.task.count({
-      where: { caseId: id, status: { notIn: ['DONE', 'CANCELLED'] } },
-    });
-    if (openTaskCount > 0) {
-      throw new ConflictException({
-        code: 'OPEN_TASKS_REMAIN',
-        message: `${openTaskCount} task(s) on this case are not Done/Cancelled — resolve them before closing.`,
-        openTaskCount,
-      });
-    }
-
-    if (await this.payments.hasOutstandingDebtForCase(id)) {
-      throw new ConflictException({
-        code: 'OUTSTANDING_DEBT_REMAINS',
-        message: 'This case has unresolved payments (pending, partially paid, or overdue) — settle them before closing.',
-      });
-    }
-
-    if (await this.visaStatus.hasOpenVisa(id)) {
-      throw new ConflictException({
-        code: 'VISA_IN_PROGRESS',
-        message: 'This case has a visa that is not yet Granted, Refused, or Withdrawn — resolve it before closing.',
-      });
-    }
-
-    if (await this.visaStatus.hasUnconfirmedRequiredEnrollment(id)) {
-      throw new ConflictException({
-        code: 'ENROLLMENT_NOT_CONFIRMED',
-        message: 'This case has an application in progress but no confirmed enrollment — confirm or withdraw it before closing.',
-      });
-    }
-
-    if (await this.visaStatus.hasIncompletePreDepartureChecklist(id)) {
-      throw new ConflictException({
-        code: 'PRE_DEPARTURE_CHECKLIST_INCOMPLETE',
-        message: 'This case has required pre-departure checklist items that are not yet Done or Waived — complete them before closing.',
-      });
-    }
-
-    return this.prisma.case.update({
-      where: { id },
-      data: { status: 'CLOSED', closureReason: dto.closureReason, closedAt: new Date() },
-    });
   }
 
   async addMember(principal: Principal, id: string, dto: AddCaseMemberDto): Promise<CaseMember> {

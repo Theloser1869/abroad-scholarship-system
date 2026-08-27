@@ -35,6 +35,7 @@ function baseContract(overrides: Partial<Contract> = {}): Contract {
     contractCode: "HD-2026-00001",
     studentId: "student-1",
     student: { id: "student-1", studentCode: "HS-2026-00001", fullName: "Trần Văn A" },
+    caseId: null,
     templateId: null,
     mergeFieldValues: null,
     servicePackage: null,

@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import type { AcademicRecord, CreateAcademicRecordInput, UpdateAcademicRecordInput } from "@/lib/profile-evidence/types";
+import { SchoolPicker } from "./school-picker";
 
 /// One row per (school, period) — a later period is always a NEW record, never a replacement
 /// (F04 instruction §23). Editing an existing row is a correction to THAT period only.
@@ -25,6 +26,7 @@ export function AcademicRecordDialog({
   submitting: boolean;
 }) {
   const [school, setSchool] = useState("");
+  const [schoolMasterId, setSchoolMasterId] = useState<string | null>(null);
   const [period, setPeriod] = useState("");
   const [grade, setGrade] = useState("");
   const [gpa, setGpa] = useState("");
@@ -35,6 +37,7 @@ export function AcademicRecordDialog({
 
   useResetOnOpen(open, () => {
     setSchool(record?.school ?? "");
+    setSchoolMasterId(record?.schoolMasterId ?? null);
     setPeriod(record?.period ?? "");
     setGrade(record?.grade ?? "");
     setGpa(record?.gpa ?? "");
@@ -50,6 +53,7 @@ export function AcademicRecordDialog({
     try {
       await onSubmit({
         school: school.trim(),
+        schoolMasterId: schoolMasterId ?? undefined,
         period: period.trim(),
         grade: grade.trim() || undefined,
         gpa: gpa ? Number(gpa) : undefined,
@@ -67,12 +71,14 @@ export function AcademicRecordDialog({
     <Dialog open={open} onClose={onClose} title={record ? "Sửa hồ sơ học tập" : "Thêm hồ sơ học tập"}>
       <form onSubmit={handleSubmit} noValidate className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="academic-school" className="mb-1 block text-sm font-medium">
-              Trường *
-            </label>
-            <Input id="academic-school" value={school} onChange={(e) => setSchool(e.target.value)} required />
-          </div>
+          <SchoolPicker
+            school={school}
+            schoolMasterId={schoolMasterId}
+            onChange={(nextSchool, nextSchoolMasterId) => {
+              setSchool(nextSchool);
+              setSchoolMasterId(nextSchoolMasterId);
+            }}
+          />
           <div>
             <label htmlFor="academic-period" className="mb-1 block text-sm font-medium">
               Kỳ học *
@@ -100,7 +106,7 @@ export function AcademicRecordDialog({
             <Input id="academic-scale" value={gradingScale} onChange={(e) => setGradingScale(e.target.value)} placeholder="4.0, 10, %..." />
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">Lớp và GPA cùng với hồ sơ học sinh cần điền đầy đủ trước khi duyệt đánh giá (Assessment).</p>
+        <p className="text-xs text-muted-foreground">Lớp cùng với hồ sơ học sinh cần điền đầy đủ trước khi duyệt đánh giá (Assessment). GPA là tùy chọn.</p>
         <div>
           <label htmlFor="academic-evidence" className="mb-1 block text-sm font-medium">
             Document ID minh chứng

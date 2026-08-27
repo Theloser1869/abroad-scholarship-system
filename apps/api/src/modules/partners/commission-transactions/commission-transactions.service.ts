@@ -123,6 +123,7 @@ export class CommissionTransactionsService {
         studentId: dto.studentId ?? source.studentId ?? undefined,
         caseId: dto.caseId ?? source.caseId ?? undefined,
         contractId: source.contractId,
+        visaId: source.visaId,
         applicationId: dto.applicationId,
         sourceType: dto.sourceType,
         sourceId: dto.sourceId,
@@ -239,6 +240,18 @@ export class CommissionTransactionsService {
       if (!contract) throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: `Contract ${sourceId} not found.` });
       return { amount: contract.value, currency: contract.currency };
     }
+    // Client Acceptance Remediation DEC-09 (2026-08-27) — Visa has no monetary field at
+    // all, so a percentage-of-basis commission is mathematically impossible to compute from
+    // one. `calculate()` only reaches this method `if (rule.basis !== 'FIXED')`, so this only
+    // fires if a non-FIXED rule was mistakenly attached to a Visa-sourced transaction; reject
+    // explicitly rather than silently falling into the Payment lookup below and failing with
+    // a misleading PAYMENT_NOT_FOUND.
+    if (sourceType === 'Visa') {
+      throw new BadRequestException({
+        code: 'COMMISSION_BASIS_MUST_BE_FIXED_FOR_VISA',
+        message: 'A Visa-sourced commission has no monetary basis to read — its CommissionRule must be FIXED, not percentage-based.',
+      });
+    }
     const payment = await this.prisma.payment.findUnique({ where: { id: sourceId } });
     if (!payment) throw new NotFoundException({ code: 'PAYMENT_NOT_FOUND', message: `Payment ${sourceId} not found.` });
     return { amount: payment.paidAmount, currency: payment.currency };
@@ -249,13 +262,21 @@ export class CommissionTransactionsService {
   /// one hop via `Payment.contractId` for `sourceType==='Payment'` — so the new
   /// `CommissionTransaction.contractId` FK stays populated either way, giving a single
   /// direct join for "which contract earned this commission" without callers needing to
-  /// know which base a given transaction was created against.
-  private async resolveSource(sourceType: string, sourceId: string): Promise<{ studentId?: string; caseId?: string; contractId?: string }> {
+  /// know which base a given transaction was created against. `visaId` (DEC-09,
+  /// 2026-08-27) follows the identical auto-resolution idiom for `sourceType==='Visa'` —
+  /// this is what makes it "required for Visa-sourced commissions, absent for others" per
+  /// the client's own framing, with no separate conditional-validation layer needed.
+  private async resolveSource(sourceType: string, sourceId: string): Promise<{ studentId?: string; caseId?: string; contractId?: string; visaId?: string }> {
     if (sourceType === 'Contract') {
       const contract = await this.prisma.contract.findUnique({ where: { id: sourceId } });
       if (!contract) throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: `Contract ${sourceId} not found.` });
       const caseRecord = await this.prisma.case.findFirst({ where: { contractId: sourceId } });
       return { studentId: contract.studentId, caseId: caseRecord?.id, contractId: contract.id };
+    }
+    if (sourceType === 'Visa') {
+      const visa = await this.prisma.visa.findUnique({ where: { id: sourceId } });
+      if (!visa) throw new NotFoundException({ code: 'VISA_NOT_FOUND', message: `Visa ${sourceId} not found.` });
+      return { studentId: visa.studentId, caseId: visa.caseId, visaId: visa.id };
     }
     const payment = await this.prisma.payment.findUnique({ where: { id: sourceId }, include: { contract: true } });
     if (!payment) throw new NotFoundException({ code: 'PAYMENT_NOT_FOUND', message: `Payment ${sourceId} not found.` });

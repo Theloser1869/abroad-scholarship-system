@@ -38,7 +38,9 @@ function makePartner(overrides: Partial<Partner> = {}): Partner {
 
 describe("PartnersPage (list) — GLOBAL master data, distinct from PartnerProgram/PartnerDocument/PartnerStudentLink/CommissionRule/CommissionTransaction", () => {
   it("shows the forbidden state for a role without partner:view", async () => {
-    authState.principal = { userId: "u1", roleCode: "CONSULTANT" };
+    // CONSULTANT now holds view-only `partner:view` (client permission-matrix remediation,
+    // 2026-08-25) — SALES_MARKETING has no `partner` grant at all.
+    authState.principal = { userId: "u1", roleCode: "SALES_MARKETING" };
     renderWithProviders(<PartnersPage />);
     expect(await screen.findByText(/Không có quyền truy cập/)).toBeInTheDocument();
     expect(partnersApi.listPartners).not.toHaveBeenCalled();

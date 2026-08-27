@@ -31,6 +31,7 @@ export function ActivityDialog({
   const [description, setDescription] = useState("");
   const [hours, setHours] = useState("");
   const [impact, setImpact] = useState("");
+  const [award, setAward] = useState("");
   const [verifierName, setVerifierName] = useState("");
   const [evidenceDocumentId, setEvidenceDocumentId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +44,7 @@ export function ActivityDialog({
     setDescription(record?.description ?? "");
     setHours(record?.hours ?? "");
     setImpact(record?.impact ?? "");
+    setAward(record?.award ?? "");
     setVerifierName(record?.verifierName ?? "");
     setEvidenceDocumentId(record?.evidenceDocumentId ?? "");
     setError(null);
@@ -60,6 +62,7 @@ export function ActivityDialog({
         description: description || undefined,
         hours: hours ? Number(hours) : undefined,
         impact: impact || undefined,
+        award: award || undefined,
         verifierName: verifierName || undefined,
         evidenceDocumentId: evidenceDocumentId || undefined,
       });
@@ -119,6 +122,14 @@ export function ActivityDialog({
             </label>
             <Input id="activity-impact" value={impact} onChange={(e) => setImpact(e.target.value)} />
           </div>
+          <div>
+            <label htmlFor="activity-award" className="mb-1 block text-sm font-medium">
+              Giải thưởng
+            </label>
+            <Input id="activity-award" value={award} onChange={(e) => setAward(e.target.value)} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <label htmlFor="activity-verifier" className="mb-1 block text-sm font-medium">
               Người xác minh

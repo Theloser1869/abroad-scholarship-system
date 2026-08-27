@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input, FORM_CONTROL_CLASSES } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
-import type { UpdateCaseStageInput } from "@/lib/cases/types";
+import { CASE_STAGES, type CaseStage, type UpdateCaseStageInput } from "@/lib/cases/types";
+import { CASE_STAGE_LABEL } from "@/components/crm/status-badge";
 
 export function CaseStageDialog({
   open,
@@ -19,12 +20,12 @@ export function CaseStageDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  currentStage: string;
+  currentStage: CaseStage;
   currentDepartment: string | null;
   onSubmit: (input: UpdateCaseStageInput) => Promise<unknown>;
   submitting: boolean;
 }) {
-  const [stage, setStage] = useState(currentStage);
+  const [stage, setStage] = useState<CaseStage>(currentStage);
   const [department, setDepartment] = useState(currentDepartment ?? "");
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -37,10 +38,9 @@ export function CaseStageDialog({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!stage.trim()) return;
     setError(null);
     try {
-      await onSubmit({ stage: stage.trim(), department: department.trim() || undefined });
+      await onSubmit({ stage, department: department.trim() || undefined });
       toast({ title: "Đã cập nhật giai đoạn case.", variant: "success" });
       onClose();
     } catch (err) {
@@ -55,7 +55,13 @@ export function CaseStageDialog({
           <label htmlFor="case-stage" className="mb-1 block text-sm font-medium">
             Giai đoạn *
           </label>
-          <Input id="case-stage" required value={stage} onChange={(e) => setStage(e.target.value)} />
+          <select id="case-stage" required className={FORM_CONTROL_CLASSES} value={stage} onChange={(e) => setStage(e.target.value as CaseStage)}>
+            {CASE_STAGES.map((s) => (
+              <option key={s} value={s}>
+                {CASE_STAGE_LABEL[s]}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label htmlFor="case-department" className="mb-1 block text-sm font-medium">
@@ -72,7 +78,7 @@ export function CaseStageDialog({
           <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
             Hủy
           </Button>
-          <Button type="submit" disabled={submitting || !stage.trim()}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? "Đang lưu..." : "Lưu"}
           </Button>
         </div>

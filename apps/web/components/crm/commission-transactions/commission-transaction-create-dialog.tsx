@@ -9,7 +9,7 @@ import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import type { CommissionSourceType, CreateCommissionTransactionInput } from "@/lib/commission-transactions/types";
 
-const SOURCE_TYPES: CommissionSourceType[] = ["Contract", "Payment"];
+const SOURCE_TYPES: CommissionSourceType[] = ["Contract", "Payment", "Visa"];
 
 /// Create a CommissionTransaction (F06 instruction §22) — `sourceId`/`commissionRuleId`/
 /// `studentId`/`caseId`/`applicationId` are manual UUID inputs (the source Contract/Payment
@@ -86,7 +86,7 @@ export function CommissionTransactionCreateDialog({
             >
               {SOURCE_TYPES.map((s) => (
                 <option key={s} value={s}>
-                  {s === "Contract" ? "Hợp đồng" : "Thanh toán"}
+                  {s === "Contract" ? "Hợp đồng" : s === "Payment" ? "Thanh toán" : "Visa"}
                 </option>
               ))}
             </select>
@@ -95,7 +95,7 @@ export function CommissionTransactionCreateDialog({
             <label htmlFor="commission-transaction-source-id" className="mb-1 block text-sm font-medium">
               Source ID *
             </label>
-            <Input id="commission-transaction-source-id" value={sourceId} onChange={(e) => setSourceId(e.target.value)} placeholder="UUID hợp đồng/thanh toán" required />
+            <Input id="commission-transaction-source-id" value={sourceId} onChange={(e) => setSourceId(e.target.value)} placeholder="UUID hợp đồng/thanh toán/visa" required />
           </div>
         </div>
         <div>

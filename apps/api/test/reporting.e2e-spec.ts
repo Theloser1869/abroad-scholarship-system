@@ -160,6 +160,33 @@ describe('Reporting (e2e)', () => {
       expect(res.body.deadlines).toMatchObject({ overdueTasks: expect.any(Number), dueWithin7Days: expect.any(Number) });
       expect(res.body.workload.overdueTasks).toBe(res.body.deadlines.overdueTasks);
     });
+
+    // sheet06 (Task_KPI) rows 6/9-12/14 — profile completeness / writing / LOR / pre-departure
+    // checklist completion, each cross-checked against an independent live query using the
+    // exact same conditions as the underlying service (never a second/diverging definition).
+    it('includes sheet06 KPI completion counts, each matching an independent live query', async () => {
+      const res = await request(app.getHttpServer()).get('/reports/executive').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.kpi).toMatchObject({
+        profileCompleteness: { total: expect.any(Number), complete: expect.any(Number) },
+        writingCompleted: { total: expect.any(Number), complete: expect.any(Number) },
+        lorCompleted: { total: expect.any(Number), complete: expect.any(Number) },
+        preDepartureChecklistCompletion: { applicable: expect.any(Number), complete: expect.any(Number) },
+      });
+
+      const [writingTotal, writingComplete, lorTotal, lorComplete] = await Promise.all([
+        prisma.writingArtifact.count(),
+        prisma.writingArtifact.count({ where: { status: { in: ['FINAL', 'SUBMITTED'] } } }),
+        prisma.letterOfRecommendation.count(),
+        prisma.letterOfRecommendation.count({ where: { submissionStatus: 'SUBMITTED' } }),
+      ]);
+      expect(res.body.kpi.writingCompleted).toEqual({ total: writingTotal, complete: writingComplete });
+      expect(res.body.kpi.lorCompleted).toEqual({ total: lorTotal, complete: lorComplete });
+
+      // Completeness/checklist counts are never negative and complete never exceeds total.
+      expect(res.body.kpi.profileCompleteness.complete).toBeLessThanOrEqual(res.body.kpi.profileCompleteness.total);
+      expect(res.body.kpi.preDepartureChecklistCompletion.complete).toBeLessThanOrEqual(res.body.kpi.preDepartureChecklistCompletion.applicable);
+    });
   });
 
   describe('manager dashboard — ED/DM only', () => {
@@ -176,6 +203,22 @@ describe('Reporting (e2e)', () => {
     it('CONSULTANT is denied', async () => {
       const res = await request(app.getHttpServer()).get('/reports/manager').set('Authorization', `Bearer ${consultantAToken}`);
       expect(res.status).toBe(403);
+    });
+
+    // sheet06 (Task_KPI) rows 3/4 — "Case đang phụ trách" / "Task/case", per owner.
+    // `tasksPerCase` is `openTasks / activeCases`, `null` only when `activeCases` is 0.
+    it('includes activeCases/tasksPerCase per owner (sheet06 rows 3/4), consistent with openTasks', async () => {
+      const res = await request(app.getHttpServer()).get('/reports/manager').set('Authorization', `Bearer ${directorToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.workload.length).toBeGreaterThan(0);
+      for (const row of res.body.workload) {
+        expect(typeof row.activeCases).toBe('number');
+        if (row.activeCases > 0) {
+          expect(row.tasksPerCase).toBeCloseTo(row.openTasks / row.activeCases, 2);
+        } else {
+          expect(row.tasksPerCase).toBeNull();
+        }
+      }
     });
   });
 

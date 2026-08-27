@@ -25,14 +25,6 @@ export function updateCaseStatus(id: string, status: string): Promise<Case> {
   return apiFetch<Case>(`/cases/${id}/status`, { method: "PATCH", body: { status } });
 }
 
-/// Backend runs 4 sequential preconditions (open tasks, outstanding debt, open visa,
-/// unconfirmed enrollment/incomplete pre-departure checklist) — this function never
-/// pre-checks any of them; a failing precondition comes back as a specific 409, surfaced
-/// verbatim to the caller.
-export function closeCase(id: string, closureReason: string): Promise<Case> {
-  return apiFetch<Case>(`/cases/${id}/close`, { method: "PATCH", body: { closureReason } });
-}
-
 export function listCaseMembers(id: string): Promise<CaseMember[]> {
   return apiFetch<CaseMember[]>(`/cases/${id}/members`);
 }

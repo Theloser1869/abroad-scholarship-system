@@ -20,6 +20,13 @@ import { UpdateContractDto } from './dto/update-contract.dto';
 
 const SORTABLE_FIELDS = ['createdAt', 'value', 'status'] as const;
 
+/// Client Acceptance Remediation DEC-01 (2026-08-27) — client-confirmed activation
+/// threshold: SIGNED -> ACTIVE requires at least this fraction of Contract.value received
+/// (net of refunds) across all of the Contract's Payments. Replaces the interim "any
+/// payment received" rule (ASM-88/CONFLICT-001, now resolved). See
+/// docs/requirements/CLIENT_CLARIFICATION_SIGNOFF.md DEC-01.
+const ACTIVATION_PAYMENT_THRESHOLD_RATIO = 0.3;
+
 /// Display-safe student summary — same `select`-scoped pattern as `cases.service.ts`'s
 /// `STUDENT_SUMMARY_SELECT` (docs/DECISIONS.md DEC-09), never a bare `include: { student:
 /// true } }` (would leak `budget`/`budgetCurrency` regardless of the caller's own field
@@ -28,7 +35,7 @@ const SORTABLE_FIELDS = ['createdAt', 'value', 'status'] as const;
 /// full-table-scan workaround.
 const STUDENT_SUMMARY_SELECT = { select: { id: true, studentCode: true, fullName: true } } as const;
 
-export type ContractWithStudent = Contract & { student: { id: string; studentCode: string; fullName: string } };
+export type ContractWithStudent = Contract & { student: { id: string; studentCode: string; fullName: string }; caseId: string | null };
 
 /// SRS section 9 Contract status machine. Each of DRAFT/REVIEW/APPROVED/SENT/SIGNED has
 /// its own dedicated method with its own preconditions (submit/approve/reject/send/sign)
@@ -89,9 +96,17 @@ export class ContractsService {
 
   async getById(principal: Principal, id: string): Promise<ContractWithStudent> {
     await this.scope.assertContractAccessible(principal, id);
-    const contract = await this.prisma.contract.findUnique({ where: { id }, include: { student: STUDENT_SUMMARY_SELECT } });
+    const contract = await this.prisma.contract.findUnique({
+      where: { id },
+      include: { student: STUDENT_SUMMARY_SELECT, case: { select: { id: true } } },
+    });
     if (!contract) throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: `Contract ${id} not found.` });
-    return contract as ContractWithStudent;
+    // Client Acceptance Remediation DEC-06 (2026-08-26) — an ID-only pointer (never the full
+    // Case object) so the Contract closure page can link to the unified `/cases/:id/closure`
+    // workflow. Deliberately not real Case data: ADMIN_FINANCE still has no `cases:view`
+    // grant (see contracts.e2e-spec.ts's own "ADMIN_FINANCE cannot see Case data at all").
+    const { case: linkedCase, ...rest } = contract;
+    return { ...rest, caseId: linkedCase?.id ?? null };
   }
 
   /// "Không tạo Student hoặc Case mới chỉ vì tạo Contract" — `dto.studentId` must already
@@ -263,14 +278,33 @@ export class ContractsService {
     }
     const timestampField = { ACTIVE: 'activatedAt', COMPLETED: 'completedAt', LIQUIDATED: 'liquidatedAt', ARCHIVED: 'archivedAt' }[newStatus];
 
-    /// Client Acceptance Remediation GAP-002 (CRITICAL, REQ-CONTRACT-002/CONFLICT-001) —
-    /// 11_Quan_ly_hop_dong places PAYMENT as its own stage between SIGNED and ACTIVE; the
-    /// customer sheet names no exact threshold (full payment vs. a deposit), so this checks
-    /// for at least one payment actually RECEIVED (PARTIALLY_PAID or PAID — see
-    /// docs/ASSUMPTIONS.md ASM-88 for the exact threshold decision and
-    /// docs/requirements/CLIENT_REQUIREMENT_CONFLICTS.md CONFLICT-001 for why this is
-    /// flagged for client confirmation rather than silently assumed final). The payment
-    /// check and the status update run in one interactive transaction, and the update
+    /// Client Acceptance Remediation DEC-06 (GAP-007, REQ-CASE-014, 2026-08-26) — the old
+    /// independent Contract-level COMPLETED/LIQUIDATED path is now superseded by the
+    /// unified `ClosureService` (`POST /cases/:id/closure/close` /
+    /// `.../liquidation/confirm-company`), which runs the full DEC-07 6-item checklist and
+    /// keeps `Case.status`/`Contract.status` synchronized in one transaction — the client's
+    /// own instruction: "Không được duy trì hai closure paths có business rule khác nhau."
+    /// By the time a Contract can reach ACTIVE at all, `sign()` has already required and set
+    /// its linked Case (see `sign()` above), so this is not a data-loss risk for any
+    /// reachable contract — only a legacy/orphan Contract with no Case (never possible via
+    /// the normal signing flow) would still need the old path, and none exists in practice.
+    if ((newStatus === 'COMPLETED' || newStatus === 'LIQUIDATED')) {
+      const linkedCase = await this.prisma.case.findUnique({ where: { contractId: id } });
+      if (linkedCase) {
+        throw new ConflictException({
+          code: 'USE_UNIFIED_CLOSURE_WORKFLOW',
+          message: `This contract is linked to Case ${linkedCase.caseCode} — use the unified Closure workflow (/cases/${linkedCase.id}/closure) instead of changing Contract status directly.`,
+          caseId: linkedCase.id,
+        });
+      }
+    }
+
+    /// Client Acceptance Remediation GAP-002 (CRITICAL, REQ-CONTRACT-002) — 11_Quan_ly_hop_dong
+    /// places PAYMENT as its own stage between SIGNED and ACTIVE. DEC-01 (2026-08-27,
+    /// CLIENT_CLARIFICATION_SIGNOFF.md) resolved CONFLICT-001: the client set an explicit
+    /// threshold — at least 30% of Contract.value must be received (net of refunds) before
+    /// activation; below 30% is not sufficient regardless of how many payments exist. The
+    /// payment check and the status update run in one interactive transaction, and the update
     /// itself is a compare-and-swap (`updateMany` gated on the status this call already
     /// observed) so two concurrent activation attempts — or a payment being refunded
     /// between the check and the commit — can't both succeed.
@@ -287,11 +321,16 @@ export class ContractsService {
     /// is the liquidation-record text.
     const updated = await this.prisma.$transaction(async (tx) => {
       if (newStatus === 'ACTIVE') {
-        const receivedCount = await tx.payment.count({ where: { contractId: id, status: { in: ['PARTIALLY_PAID', 'PAID'] } } });
-        if (receivedCount === 0) {
+        const payments = await tx.payment.findMany({ where: { contractId: id }, select: { paidAmount: true, refundedAmount: true } });
+        const netPaid = payments.reduce((sum, p) => sum + Number(p.paidAmount) - Number(p.refundedAmount), 0);
+        const requiredAmount = Number(contract.value) * ACTIVATION_PAYMENT_THRESHOLD_RATIO;
+        if (netPaid < requiredAmount) {
           throw new ConflictException({
             code: 'PAYMENT_REQUIRED_FOR_ACTIVATION',
-            message: 'This contract has no payment recorded yet — record at least one payment before activating the contract.',
+            message: `This contract requires at least ${ACTIVATION_PAYMENT_THRESHOLD_RATIO * 100}% of its value (${requiredAmount.toFixed(2)} ${contract.currency}) received before activation — ${netPaid.toFixed(2)} ${contract.currency} received so far.`,
+            netPaid,
+            requiredAmount,
+            thresholdRatio: ACTIVATION_PAYMENT_THRESHOLD_RATIO,
           });
         }
       }

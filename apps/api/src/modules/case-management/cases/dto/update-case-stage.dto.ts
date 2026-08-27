@@ -1,9 +1,9 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { CaseStage } from '@prisma/client';
+import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateCaseStageDto {
-  @IsString()
-  @MaxLength(100)
-  stage!: string;
+  @IsEnum(CaseStage)
+  stage!: CaseStage;
 
   @IsOptional()
   @IsString()

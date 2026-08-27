@@ -86,7 +86,7 @@ export const STAFF_NAV: NavGroup[] = [
     label: "Quản trị",
     items: [
       { label: "Người dùng", href: "/admin/users", resource: "users", action: "view", implemented: false },
-      { label: "Audit log", href: "/admin/audit-logs", resource: "audit_logs", action: "view", implemented: false },
+      { label: "Audit log", href: "/admin/audit-logs", resource: "audit_logs", action: "view", implemented: true },
       { label: "Jobs", href: "/admin/jobs", resource: "jobs", action: "view", implemented: false },
     ],
   },

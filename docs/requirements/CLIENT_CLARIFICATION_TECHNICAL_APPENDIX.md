@@ -4,7 +4,17 @@ Companion to `docs/requirements/CLIENT_CLARIFICATION_SIGNOFF.md`. This appendix 
 
 ---
 
-## DEC-01 — Payment activation threshold
+## DEC-01 — Payment activation threshold — **IMPLEMENTED 2026-08-27 (Option B chosen: 30%)**
+
+**2026-08-27 update:** Client chose Option B — a specific percentage (30% of `Contract.value`,
+net of refunds). Implemented exactly as the "Expected migration impact"/"Regression impact"
+notes below predicted: a pure service-layer aggregate-comparison change
+(`ACTIVATION_PAYMENT_THRESHOLD_RATIO` in `ContractsService.updateStatus`), no schema change,
+no permission change. Regression scope was exactly as predicted too — `contracts.e2e-spec.ts`'s
+"activation — payment-gated" block plus two payment-amount fixtures in `payments.e2e-spec.ts`
+that happened to fall below the new 30% floor. Full suite green (backend unit 209/209, e2e
+546/546, frontend 325/325). The rest of this section is left unchanged below as the original
+pre-decision scoping record.
 
 **Affected entities:** `Contract`, `Payment`.
 **Affected APIs:** `PATCH /contracts/:id/status` → `ContractsService.updateStatus()` (`apps/api/src/modules/commercial/contracts/contracts.service.ts`, SIGNED→ACTIVE branch).
@@ -28,7 +38,14 @@ Companion to `docs/requirements/CLIENT_CLARIFICATION_SIGNOFF.md`. This appendix 
 
 ---
 
-## DEC-03 — Partner data access scope
+## DEC-03 — Partner data access scope — **RESOLVED 2026-08-27 (Option C chosen: no filtering)**
+
+**2026-08-27 update:** Client chose Option C — Partner is company-wide shared data, not
+case-scoped; any staff with `partners:view` sees every Partner record. No code, schema, or
+migration change needed — `PartnersService.list()`/`.getById()`'s existing behavior (no
+case-ownership filter) already matches this. The "Option B" scoping design below was never
+built. The rest of this section is left unchanged below as the original pre-decision scoping
+record, for whichever future decision might revisit this.
 
 **Affected entities:** `Partner`, `PartnerStudentLink`, `Case`.
 **Affected APIs:** `PartnersService.list()` / `.getById()` (`apps/api/src/modules/partners/partner-master/partners.service.ts`).

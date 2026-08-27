@@ -1,4 +1,5 @@
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import type { CaseStage } from "@/lib/cases/types";
 
 /// Maps a domain status enum (Lead/Case) onto the shared four-variant Badge — no domain enum
 /// lives inside `components/ui/badge.tsx` itself (F03 instruction: reuse the F01 semantic
@@ -420,4 +421,83 @@ export const PORTAL_LINK_STATUS_LABEL: Record<string, string> = {
   INVITED: "Đã mời — chờ chấp nhận",
   ACTIVE: "Đang hoạt động",
   REVOKED: "Đã thu hồi",
+};
+
+/// Client Acceptance Remediation DEC-06/07/08 (GAP-007) — the unified Closure workflow's
+/// 6-item checklist (`ClosureChecklistItemStatus`). NOT_APPLICABLE is only ever produced
+/// for the Visa item — see `ClosureService.buildStatus`'s own doc comment.
+export const CLOSURE_CHECKLIST_STATUS_VARIANT: Record<string, BadgeVariant> = {
+  PASS: "success",
+  FAIL: "danger",
+  NOT_APPLICABLE: "neutral",
+};
+
+export const CLOSURE_CHECKLIST_STATUS_LABEL: Record<string, string> = {
+  PASS: "Đạt",
+  FAIL: "Chưa đạt",
+  NOT_APPLICABLE: "Không áp dụng",
+};
+
+export const CLOSURE_CHECKLIST_ITEM_LABEL: Record<string, string> = {
+  DEBT: "Công nợ",
+  OPEN_TASKS: "Công việc còn mở",
+  VISA: "Visa",
+  ENROLLMENT: "Xác nhận nhập học",
+  PRE_DEPARTURE: "Checklist trước khi bay",
+  DOCUMENT_HANDOVER: "Bàn giao tài liệu",
+};
+
+export const CLOSURE_HANDOVER_STATUS_VARIANT: Record<string, BadgeVariant> = {
+  PENDING: "neutral",
+  COMPLETED: "success",
+};
+
+export const CLOSURE_HANDOVER_STATUS_LABEL: Record<string, string> = {
+  PENDING: "Chưa bàn giao",
+  COMPLETED: "Đã bàn giao",
+};
+
+export const CLOSURE_LIQUIDATION_STATUS_VARIANT: Record<string, BadgeVariant> = {
+  PENDING: "warning",
+  LIQUIDATED: "success",
+};
+
+export const CLOSURE_LIQUIDATION_STATUS_LABEL: Record<string, string> = {
+  PENDING: "Chờ xác nhận",
+  LIQUIDATED: "Đã thanh lý",
+};
+
+/// `AuditLog.result` — written by `AuditInterceptor` (`common/audit/audit.interceptor.ts`),
+/// three values only: 'SUCCESS' | 'DENIED' | 'ERROR'.
+export const AUDIT_RESULT_VARIANT: Record<string, BadgeVariant> = {
+  SUCCESS: "success",
+  DENIED: "warning",
+  ERROR: "danger",
+};
+
+export const AUDIT_RESULT_LABEL: Record<string, string> = {
+  SUCCESS: "Thành công",
+  DENIED: "Từ chối",
+  ERROR: "Lỗi",
+};
+
+/// REQ-CASE-016 (2026-08-26) — sheet08 (Case_Workflow)'s 15-stage narrative, Vietnamese
+/// labels straight from the source Excel. Rendered as plain text (`cases/[id]/page.tsx`) and
+/// as the dropdown option list (`CaseStageDialog`) — not a colored badge, so no `_VARIANT` map.
+export const CASE_STAGE_LABEL: Record<CaseStage, string> = {
+  LEAD_TO_CONTRACT: "Lead → Contract",
+  CONTRACT_SIGNING: "Ký hợp đồng",
+  ASSESSMENT: "Assessment",
+  ROADMAP: "Roadmap",
+  PROFILE_DEVELOPMENT: "Profile Development",
+  WRITING: "Writing",
+  SCHOOL_SELECTION: "School Selection",
+  APPLICATION: "Application",
+  OFFER: "Offer",
+  SCHOLARSHIP: "Scholarship",
+  VISA: "Visa",
+  PRE_DEPARTURE: "Pre-departure",
+  ENROLLMENT: "Enrollment",
+  CLOSURE: "Closure",
+  ARCHIVE: "Archive",
 };

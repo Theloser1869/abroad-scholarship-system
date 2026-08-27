@@ -100,4 +100,23 @@ export interface PortalListParams {
   [key: string]: string | number | boolean | undefined;
 }
 
+/// Client Acceptance Remediation DEC-06/07/08 (GAP-007) — mirrors `PortalService.
+/// getClosure`'s redacted shape (`ClosureStatus` from `lib/closure/types.ts` with
+/// `handover.notes` always `null`).
+export interface PortalClosureStatus {
+  caseId: string;
+  caseCode: string;
+  caseStatus: string;
+  checklist: { key: string; status: "PASS" | "FAIL" | "NOT_APPLICABLE"; detail?: string }[];
+  readyToClose: boolean;
+  handover: { status: "PENDING" | "COMPLETED"; handedOverAt: string | null; recipientName: string | null; notes: null };
+  liquidation: PortalLiquidationStatus | null;
+}
+
+export interface PortalLiquidationStatus {
+  status: "PENDING" | "LIQUIDATED";
+  companyConfirmedAt: string | null;
+  studentParentConfirmedAt: string | null;
+}
+
 export type { Application, ApplicationChecklistItem, ScholarshipApplication, Visa, VisaChecklistItem, Enrollment, Contract, Payment };

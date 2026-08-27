@@ -124,6 +124,17 @@ describe('Partners + Commission (e2e)', () => {
     return { contractId: contract.id, paymentId };
   }
 
+  /// Client Acceptance Remediation DEC-09 (2026-08-27) — minimal real Visa fixture for the
+  /// Commission↔Visa direct-link tests below.
+  async function createVisa(caseId: string): Promise<{ visaId: string }> {
+    const res = await request(app.getHttpServer())
+      .post(`/cases/${caseId}/visas`)
+      .set('Authorization', `Bearer ${consultantAToken}`)
+      .send({ countryCode: 'US', visaType: `F-1-${randomUUID()}` });
+    expect(res.status).toBe(201);
+    return { visaId: res.body.id };
+  }
+
   // ---------------------------------------------------------------------------
   // Partner
   // ---------------------------------------------------------------------------
@@ -137,9 +148,9 @@ describe('Partners + Commission (e2e)', () => {
       expect(dup.body.error.code).toBe('DUPLICATE_PARTNER');
     });
 
-    it('CONSULTANT has zero grant (403) — "không mặc định được xem commission/partner commercial terms"', async () => {
+    it('CONSULTANT holds view-only partner:view (client permission-matrix remediation, 2026-08-25 — sheet03 "Partner CRM": Tư vấn = "Xem")', async () => {
       const res = await request(app.getHttpServer()).get(`/partners/${partnerAId}`).set('Authorization', `Bearer ${consultantAToken}`);
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
     });
 
     it('SALES_MARKETING has zero grant (403)', async () => {
@@ -232,6 +243,72 @@ describe('Partners + Commission (e2e)', () => {
     it('CONSULTANT has zero grant (403)', async () => {
       const res = await request(app.getHttpServer()).get(`/partner-programs/${partnerProgramAId}`).set('Authorization', `Bearer ${consultantAToken}`);
       expect(res.status).toBe(403);
+    });
+
+    /// REQ-ID-004/REQ-PARTNER-005 (Client Acceptance Remediation, 2026-08-27) — regression
+    /// for the `nextPartnerProgramSuffix` prefix bug: it used to emit the parent Partner's
+    /// own `PT-CC-NNNNN` code verbatim (`PT-...-NN`) instead of substituting `PP`.
+    describe('business ID prefix (REQ-ID-004 regression — PT vs PP)', () => {
+      it("generates PP-CC-NNNNN-NN, never the parent's PT- prefix, preserving the CC-NNNNN segment", async () => {
+        const partner = await createPartner();
+        expect(partner.partnerCode).toMatch(/^PT-[A-Z]{2}-\d{5}$/);
+        const parentSuffix = partner.partnerCode.slice('PT-'.length); // "CC-NNNNN"
+
+        const res = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/programs`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ name: `Prefix regression ${randomUUID()}` });
+        expect(res.status).toBe(201);
+        expect(res.body.partnerProgramCode).toBe(`PP-${parentSuffix}-01`);
+        expect(res.body.partnerProgramCode.startsWith('PT-')).toBe(false);
+      });
+
+      it('sequential generation still increments per-partner, and uniqueness still holds', async () => {
+        const partner = await createPartner();
+        const first = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/programs`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ name: `Sequential A ${randomUUID()}` });
+        const second = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/programs`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ name: `Sequential B ${randomUUID()}` });
+        expect(first.body.partnerProgramCode).toBe(`PP-${partner.partnerCode.slice(3)}-01`);
+        expect(second.body.partnerProgramCode).toBe(`PP-${partner.partnerCode.slice(3)}-02`);
+        expect(first.body.partnerProgramCode).not.toBe(second.body.partnerProgramCode);
+      });
+
+      it('a generated code is never accepted back as a client-suppliable override — immutable once created', async () => {
+        const partner = await createPartner();
+        // `partnerProgramCode` is not a field on CreatePartnerProgramDto, and the global
+        // pipe runs `forbidNonWhitelisted: true` — the whole request is rejected 400
+        // rather than silently stripping the extra field, so there is no way for a
+        // client to influence the generated code at all.
+        const res = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/programs`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ name: `Immutability check ${randomUUID()}`, partnerProgramCode: 'PP-ZZ-99999-99' });
+        expect(res.status).toBe(400);
+
+        const retry = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/programs`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ name: `Immutability check retry ${randomUUID()}` });
+        expect(retry.status).toBe(201);
+        expect(retry.body.partnerProgramCode).not.toBe('PP-ZZ-99999-99');
+        expect(retry.body.partnerProgramCode).toMatch(/^PP-[A-Z]{2}-\d{5}-\d{2}$/);
+      });
+
+      it('the pre-existing PP-US-90001-01 fixture record is untouched by the fix (no data rewrite)', async () => {
+        const res = await request(app.getHttpServer()).get(`/partner-programs/${partnerProgramAId}`).set('Authorization', `Bearer ${directorToken}`);
+        expect(res.status).toBe(200);
+        expect(res.body.partnerProgramCode).toBe('PP-US-90001-01');
+      });
+
+      it("parent Partner IDs are unaffected — still PT-CC-NNNNN, never PP-", async () => {
+        const partner = await createPartner();
+        expect(partner.partnerCode).toMatch(/^PT-[A-Z]{2}-\d{5}$/);
+      });
     });
   });
 
@@ -631,6 +708,107 @@ describe('Partners + Commission (e2e)', () => {
         .send({ reason: 'test' });
       expect(cancelAttempt.status).toBe(409);
       expect(cancelAttempt.body.error.code).toBe('COMMISSION_TRANSACTION_CLOSED');
+    });
+
+    /// Client Acceptance Remediation DEC-09 (2026-08-27) — the Visa leg of GAP-006/
+    /// REQ-PARTNER-008: "bắt buộc liên kết trực tiếp Hoa hồng ↔ Visa đối với các khoản hoa
+    /// hồng phát sinh từ Visa. Không bắt buộc đối với các khoản hoa hồng không có nguồn từ
+    /// Visa." `visaId` is auto-resolved by `resolveSource()`, the same mechanism already
+    /// proven for `contractId` above — never a separate conditional-validation layer.
+    describe('Visa leg (DEC-09) — sourceType=Visa auto-resolves visaId', () => {
+      it('creating with sourceType=Visa resolves studentId/caseId/visaId from the real Visa row', async () => {
+        const partner = await createPartner();
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-rules`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ basis: 'FIXED', currency: 'USD', fixedAmount: 50 });
+        const { studentId, caseId } = await createCaseForConsultant();
+        await linkPartnerToStudent(partner.id, studentId);
+        const { visaId } = await createVisa(caseId);
+
+        const res = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-transactions`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .send({ sourceType: 'Visa', sourceId: visaId });
+        expect(res.status).toBe(201);
+        expect(res.body.visaId).toBe(visaId);
+        expect(res.body.studentId).toBe(studentId);
+        expect(res.body.caseId).toBe(caseId);
+        expect(res.body.contractId).toBeNull();
+      });
+
+      it('an unknown Visa id is rejected (404 VISA_NOT_FOUND)', async () => {
+        const partner = await createPartner();
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-rules`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ basis: 'FIXED', currency: 'USD', fixedAmount: 50 });
+        const res = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-transactions`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .send({ sourceType: 'Visa', sourceId: randomUUID() });
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('VISA_NOT_FOUND');
+      });
+
+      it('Contract/Payment-sourced transactions still have visaId: null — no regression', async () => {
+        const partner = await createPartner();
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-rules`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ basis: 'FIXED', currency: 'USD', fixedAmount: 50 });
+        const { studentId } = await createCaseForConsultant();
+        await linkPartnerToStudent(partner.id, studentId);
+        const { contractId } = await createSignedContractWithPayment(studentId);
+
+        const res = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-transactions`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .send({ sourceType: 'Contract', sourceId: contractId });
+        expect(res.status).toBe(201);
+        expect(res.body.visaId).toBeNull();
+      });
+
+      it('a FIXED-basis Visa-sourced transaction calculates successfully', async () => {
+        const partner = await createPartner();
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-rules`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ basis: 'FIXED', currency: 'USD', fixedAmount: 75 });
+        const { studentId, caseId } = await createCaseForConsultant();
+        await linkPartnerToStudent(partner.id, studentId);
+        const { visaId } = await createVisa(caseId);
+
+        const create = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-transactions`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .send({ sourceType: 'Visa', sourceId: visaId });
+        await request(app.getHttpServer()).post(`/commission-transactions/${create.body.id}/confirm-eligibility`).set('Authorization', `Bearer ${financeToken}`);
+        const calculated = await request(app.getHttpServer()).post(`/commission-transactions/${create.body.id}/calculate`).set('Authorization', `Bearer ${financeToken}`);
+        expect(calculated.status).toBe(201);
+        expect(calculated.body.status).toBe('CALCULATED');
+        expect(calculated.body.calculatedAmount).toBe('75');
+      });
+
+      it('a percentage-basis Visa-sourced transaction fails calculate() with a clear error, not a misleading PAYMENT_NOT_FOUND', async () => {
+        const partner = await createPartner();
+        await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-rules`)
+          .set('Authorization', `Bearer ${directorToken}`)
+          .send({ basis: 'CONTRACT_VALUE', currency: 'USD', percentageRate: 0.1 });
+        const { studentId, caseId } = await createCaseForConsultant();
+        await linkPartnerToStudent(partner.id, studentId);
+        const { visaId } = await createVisa(caseId);
+
+        const create = await request(app.getHttpServer())
+          .post(`/partners/${partner.id}/commission-transactions`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .send({ sourceType: 'Visa', sourceId: visaId });
+        await request(app.getHttpServer()).post(`/commission-transactions/${create.body.id}/confirm-eligibility`).set('Authorization', `Bearer ${financeToken}`);
+        const calculated = await request(app.getHttpServer()).post(`/commission-transactions/${create.body.id}/calculate`).set('Authorization', `Bearer ${financeToken}`);
+        expect(calculated.status).toBe(400);
+        expect(calculated.body.error.code).toBe('COMMISSION_BASIS_MUST_BE_FIXED_FOR_VISA');
+      });
     });
 
     it('an illegal jump (e.g. straight to calculate from PENDING) is rejected 409', async () => {

@@ -21,11 +21,26 @@ describe("can()", () => {
     expect(can("CONSULTANT", "payments", "view")).toBe(false);
   });
 
-  it("ADMIN_FINANCE has zero students/cases grant despite full contracts/payments access", () => {
+  it("ADMIN_FINANCE has view-only students/visa access (client permission-matrix remediation, 2026-08-25) but zero cases grant, despite full contracts/payments access", () => {
     expect(can("ADMIN_FINANCE", "contracts", "create")).toBe(true);
     expect(can("ADMIN_FINANCE", "payments", "record")).toBe(true);
-    expect(can("ADMIN_FINANCE", "students", "view")).toBe(false);
+    expect(can("ADMIN_FINANCE", "students", "view")).toBe(true);
+    expect(can("ADMIN_FINANCE", "students", "edit")).toBe(false);
     expect(can("ADMIN_FINANCE", "cases", "view")).toBe(false);
+  });
+
+  it("ADMIN_FINANCE (HCTH) holds the narrow case-closure execute grant (DEC-06, 2026-08-26) without a broadened cases grant", () => {
+    expect(can("ADMIN_FINANCE", "case-closure", "view")).toBe(true);
+    expect(can("ADMIN_FINANCE", "case-closure", "execute")).toBe(true);
+    expect(can("ADMIN_FINANCE", "case-closure", "request")).toBe(false);
+    expect(can("ADMIN_FINANCE", "cases", "view")).toBe(false);
+  });
+
+  it("CONSULTANT may only request closure (advisory), never execute; EXECUTIVE_DIRECTOR may execute the audited override (DEC-06)", () => {
+    expect(can("CONSULTANT", "case-closure", "request")).toBe(true);
+    expect(can("CONSULTANT", "case-closure", "execute")).toBe(false);
+    expect(can("EXECUTIVE_DIRECTOR", "case-closure", "execute")).toBe(true);
+    expect(can("DEPARTMENT_MANAGER", "case-closure", "execute")).toBe(true);
   });
 
   it("ADMIN_FINANCE and DEPARTMENT_MANAGER never get contracts:approve/amend below EXECUTIVE_DIRECTOR-level oversight roles' full set — ADMIN_FINANCE specifically excludes approve/amend", () => {

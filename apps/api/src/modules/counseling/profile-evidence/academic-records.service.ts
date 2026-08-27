@@ -32,8 +32,18 @@ export class AcademicRecordsService {
 
   async create(principal: Principal, caseId: string, dto: CreateAcademicRecordDto): Promise<AcademicRecord> {
     await this.scope.assertCaseAccessible(principal, caseId);
+    const school = await this.resolveSchool(dto.schoolMasterId, dto.school);
     const record = await this.prisma.academicRecord.create({
-      data: { caseId, school: dto.school, period: dto.period, grade: dto.grade, gpa: dto.gpa, gradingScale: dto.gradingScale, evidenceDocumentId: dto.evidenceDocumentId },
+      data: {
+        caseId,
+        school,
+        schoolMasterId: dto.schoolMasterId,
+        period: dto.period,
+        grade: dto.grade,
+        gpa: dto.gpa,
+        gradingScale: dto.gradingScale,
+        evidenceDocumentId: dto.evidenceDocumentId,
+      },
     });
     if (dto.evidenceDocumentId) await this.documents.grantCaseAccess(dto.evidenceDocumentId, caseId);
     return record;
@@ -42,12 +52,24 @@ export class AcademicRecordsService {
   async update(principal: Principal, id: string, dto: UpdateAcademicRecordDto): Promise<AcademicRecord> {
     const record = await this.findOrThrow(id);
     await this.scope.assertCaseAccessible(principal, record.caseId);
+    const school = dto.schoolMasterId !== undefined || dto.school !== undefined ? await this.resolveSchool(dto.schoolMasterId, dto.school) : undefined;
     const updated = await this.prisma.academicRecord.update({
       where: { id },
-      data: { school: dto.school, period: dto.period, grade: dto.grade, gpa: dto.gpa, gradingScale: dto.gradingScale, evidenceDocumentId: dto.evidenceDocumentId },
+      data: { school, schoolMasterId: dto.schoolMasterId, period: dto.period, grade: dto.grade, gpa: dto.gpa, gradingScale: dto.gradingScale, evidenceDocumentId: dto.evidenceDocumentId },
     });
     if (dto.evidenceDocumentId) await this.documents.grantCaseAccess(dto.evidenceDocumentId, record.caseId);
     return updated;
+  }
+
+  /// Client Acceptance Remediation DEC-05(b) (2026-08-27) — "ưu tiên School Master, cho phép
+  /// nhập trường chưa có." When `schoolMasterId` is given, `school` is always resolved from
+  /// that row's own `name` server-side (never trusted from the client, to avoid drift between
+  /// the two); when it isn't, `school` is plain client-supplied free text.
+  private async resolveSchool(schoolMasterId: string | undefined, freeTextSchool: string | undefined): Promise<string> {
+    if (!schoolMasterId) return freeTextSchool!;
+    const master = await this.prisma.schoolMaster.findUnique({ where: { id: schoolMasterId } });
+    if (!master) throw new NotFoundException({ code: 'SCHOOL_MASTER_NOT_FOUND', message: `School master ${schoolMasterId} not found.` });
+    return master.name;
   }
 
   async verify(principal: Principal, id: string): Promise<AcademicRecord> {

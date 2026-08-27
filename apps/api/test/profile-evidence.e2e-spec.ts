@@ -120,6 +120,74 @@ describe('Profile Evidence (e2e)', () => {
     });
   });
 
+  /// Client Acceptance Remediation DEC-05(b) (2026-08-27) — "ưu tiên School Master, cho phép
+  /// nhập trường chưa có." Master-data curation (create/edit) is ED/DM-only, same pattern as
+  /// `admission_master`/`visa_checklist_templates`; CONSULTANT gets view-only.
+  describe('School Master (DEC-05(b)) — curated list, optional link from AcademicRecord', () => {
+    it('ED can create a school; a duplicate name (case-insensitive) is rejected (409)', async () => {
+      const name = `Fixture High School ${randomUUID()}`;
+      const first = await request(app.getHttpServer()).post('/school-masters').set('Authorization', `Bearer ${directorToken}`).send({ name });
+      expect(first.status).toBe(201);
+
+      const dup = await request(app.getHttpServer())
+        .post('/school-masters')
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ name: name.toUpperCase() });
+      expect(dup.status).toBe(409);
+      expect(dup.body.error.code).toBe('DUPLICATE_SCHOOL_MASTER');
+    });
+
+    it('CONSULTANT can list (view) but not create (403)', async () => {
+      const listRes = await request(app.getHttpServer()).get('/school-masters').set('Authorization', `Bearer ${consultantAToken}`);
+      expect(listRes.status).toBe(200);
+
+      const createRes = await request(app.getHttpServer())
+        .post('/school-masters')
+        .set('Authorization', `Bearer ${consultantAToken}`)
+        .send({ name: `Should Be Denied ${randomUUID()}` });
+      expect(createRes.status).toBe(403);
+    });
+
+    it('a role with zero school_master grant is denied even list access (403)', async () => {
+      const res = await request(app.getHttpServer()).get('/school-masters').set('Authorization', `Bearer ${financeToken}`);
+      expect(res.status).toBe(403);
+    });
+
+    it('creating an AcademicRecord with a schoolMasterId resolves `school` server-side from the master row, ignoring any mismatched client-sent text', async () => {
+      const master = await request(app.getHttpServer())
+        .post('/school-masters')
+        .set('Authorization', `Bearer ${directorToken}`)
+        .send({ name: `Linked School ${randomUUID()}` });
+      expect(master.status).toBe(201);
+
+      const res = await request(app.getHttpServer())
+        .post(`/cases/${caseAId}/academic-records`)
+        .set('Authorization', `Bearer ${consultantAToken}`)
+        .send({ school: 'this text should be ignored', schoolMasterId: master.body.id, period: `School-linked period ${randomUUID()}` });
+      expect(res.status).toBe(201);
+      expect(res.body.school).toBe(master.body.name);
+      expect(res.body.schoolMasterId).toBe(master.body.id);
+    });
+
+    it('creating an AcademicRecord with plain free-text school (no schoolMasterId) still works — "cho phép nhập trường chưa có"', async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/cases/${caseAId}/academic-records`)
+        .set('Authorization', `Bearer ${consultantAToken}`)
+        .send({ school: `Not Yet In Master ${randomUUID()}`, period: `Free-text period ${randomUUID()}` });
+      expect(res.status).toBe(201);
+      expect(res.body.schoolMasterId).toBeNull();
+    });
+
+    it('an unknown schoolMasterId is rejected (404 SCHOOL_MASTER_NOT_FOUND)', async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/cases/${caseAId}/academic-records`)
+        .set('Authorization', `Bearer ${consultantAToken}`)
+        .send({ school: 'irrelevant', schoolMasterId: randomUUID(), period: `Bad master period ${randomUUID()}` });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('SCHOOL_MASTER_NOT_FOUND');
+    });
+  });
+
   describe('Test records — multiple attempts, never overwritten', () => {
     it('a second attempt is a new row; the first attempt is untouched', async () => {
       // Unique testType per run — caseAId is the shared seed fixture, persistent across

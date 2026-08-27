@@ -6,6 +6,13 @@ export class CreateAcademicRecordDto {
   @MaxLength(255)
   school!: string;
 
+  /// Client Acceptance Remediation DEC-05(b) (2026-08-27) — when set, `school` above is
+  /// resolved server-side from this row's own name (never trusted from the client), so a
+  /// value is still required here for the "school not yet in the Master list" free-text case.
+  @IsOptional()
+  @IsUUID()
+  schoolMasterId?: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(100)

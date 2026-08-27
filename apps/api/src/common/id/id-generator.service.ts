@@ -30,11 +30,16 @@ export class IdGeneratorService {
     return `${prefix}-${bucket}-${String(seq).padStart(digits, '0')}`;
   }
 
-  /// `PP-CC-NNNNN-NN` — Partner Program (SRS section 8): parent Partner code supplies the
-  /// `CC-NNNNN` segment, this only generates the `-NN` sub-sequence scoped to that partner.
+  /// `PP-CC-NNNNN-NN` — Partner Program (SRS section 8): parent Partner code (`PT-CC-NNNNN`)
+  /// supplies the `CC-NNNNN` segment, this only generates the `-NN` sub-sequence scoped to
+  /// that partner. Client Acceptance Remediation (REQ-ID-004/REQ-PARTNER-005, 2026-08-27) —
+  /// the output must carry the `PP` prefix, not the parent's own `PT` prefix; the sequence
+  /// bucket key stays the full `partnerCode` (unchanged scoping/uniqueness behavior), only
+  /// the returned string's prefix segment is substituted.
   async nextPartnerProgramSuffix(partnerCode: string, digits = 2): Promise<string> {
     const seq = await this.nextSequenceValue('PP_SUFFIX', partnerCode);
-    return `${partnerCode}-${String(seq).padStart(digits, '0')}`;
+    const programPrefix = partnerCode.replace(/^PT-/, 'PP-');
+    return `${programPrefix}-${String(seq).padStart(digits, '0')}`;
   }
 
   private async nextSequenceValue(prefix: string, bucket: string): Promise<number> {

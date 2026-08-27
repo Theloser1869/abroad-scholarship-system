@@ -26,6 +26,12 @@ export const queryKeys = {
     timeline: (id: string) => [...queryKeys.cases.all, "timeline", id] as const,
     members: (id: string) => [...queryKeys.cases.all, "members", id] as const,
   },
+  /// Client Acceptance Remediation DEC-06/07/08 (GAP-007) — the unified Closure/Liquidation
+  /// workflow, `/cases/:id/closure` (see `lib/closure/api.ts`).
+  closure: {
+    all: ["closure"] as const,
+    detail: (caseId: string) => [...queryKeys.closure.all, caseId] as const,
+  },
   contracts: {
     all: ["contracts"] as const,
     lists: () => [...queryKeys.contracts.all, "list"] as const,
@@ -179,6 +185,10 @@ export const queryKeys = {
     list: (params: Record<string, unknown>) => [...queryKeys.notifications.all, "list", params] as const,
     unreadCount: () => [...queryKeys.notifications.all, "unread-count"] as const,
   },
+  auditLogs: {
+    all: ["audit-logs"] as const,
+    list: (params: Record<string, unknown>) => [...queryKeys.auditLogs.all, "list", params] as const,
+  },
   reports: {
     all: ["reports"] as const,
     executive: () => [...queryKeys.reports.all, "executive"] as const,
@@ -222,6 +232,7 @@ export const queryKeys = {
         [...queryKeys.portal.student.all(studentId), "contracts", contractId, "payments", params] as const,
       notifications: (studentId: string, params: Record<string, unknown>) =>
         [...queryKeys.portal.student.all(studentId), "notifications", params] as const,
+      closure: (studentId: string) => [...queryKeys.portal.student.all(studentId), "closure"] as const,
     },
   },
 };

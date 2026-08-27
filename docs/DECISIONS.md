@@ -533,3 +533,184 @@ asserting the real embed shape on list and detail, run targeted (`pre-departure-
 closure`, `partners`, `visa` suites, 84/84 passed) before the full regression re-run — 25 suites,
 **488/488 tests passed** (484 baseline + 4 new DEC-12 assertions), recorded in
 `docs/frontend/phase-status/PHASE_F06.md`.
+
+---
+
+## DEC-13 — Unified Closure/Liquidation workflow replaces the two independent closure mechanisms (Client Acceptance Remediation DEC-06/07/08, GAP-007, 2026-08-26)
+
+**ID**: DEC-13 (next free ID — this file's own numbering is unrelated to the client-facing
+"DEC-06/07/08" labels used in `CLIENT_CLARIFICATION_SIGNOFF.md`/`CLIENT_ACCEPTANCE_MATRIX.md`,
+which predate this file's DEC-06/07/08 by several phases and cover unrelated topics
+`StudentContact.portalUserId`, frontend stack choice, and TanStack Query timing).
+**Context**: Client Acceptance Round-2 re-audit (GAP-007, REQ-CASE-014) found two
+independent, unsynchronized closure mechanisms — `ContractsService.updateStatus`
+(ADMIN_FINANCE/HCTH only, debt-check only) and `CasesService.close()` (ED/DM/CONSULTANT,
+thorough but unreachable by HCTH, the role the client's Excel names as closure owner). The
+client then made three binding decisions (this conversation, 2026-08-26) resolving it: unify
+into one workflow with HCTH as standard executor (DEC-06); six mandatory preconditions
+including a real Document Handover check (DEC-07); a structured two-party liquidation
+confirmation (DEC-08).
+**Options**: (1) Grant ADMIN_FINANCE the existing `cases:close` permission and merge the two
+precondition sets in place; (2) build a new, dedicated Closure module/permission
+(`case-closure`) that both old paths redirect into, retiring the old permission/route
+entirely.
+**Decision**: Option 2. See `docs/requirements/CLOSURE_LIQUIDATION_DESIGN.md` for the full
+design (workflow diagram, RBAC table, data model, the "Implementation Assumptions" the
+client didn't specify).
+**Reason**: A merge-in-place (option 1) would have widened `ADMIN_FINANCE`'s general
+`cases:*` access as a side effect (it would need `cases:view`/`assertCaseAccessible` scope
+to reach the existing `CasesService.close()` code path), well beyond "Closure is its entire
+domain." A dedicated module keeps HCTH's grant narrow (`case-closure:view/execute` only)
+and gives DEC-06's role-gating (HCTH standard / ED-DM audited override / CONSULTANT
+request-only) a single, testable enforcement point instead of two.
+**Impact**: New Prisma models `ClosureHandoverRecord`/`LiquidationConfirmation` (additive
+migration `20260826015443_closure_liquidation_unification`); new backend module
+`apps/api/src/modules/case-management/closure`; `CasesService.close()` and
+`PATCH /cases/:id/close` deleted; `ContractsService.updateStatus()` rejects
+COMPLETED/LIQUIDATED once a Case is linked (`409 USE_UNIFIED_CLOSURE_WORKFLOW`); RBAC
+`cases:close` retired, new `case-closure` resource seeded; new frontend
+`/cases/:id/closure` and `/portal/students/:id/closure` pages, `lib/closure/*`; Contract
+closure page (`/contracts/:id/closure`) now read-only + link-out. Regression: backend 209
+unit / 534 of 535 e2e (1 pre-existing, unrelated, timing-dependent flake in
+`r2-storage-provider.e2e-spec.ts` — confirmed unaffected, passes clean in isolation);
+frontend 317/317. `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md` REQ-CASE-014 and
+`CLIENT_REQUIREMENTS_GAPS.md` GAP-007 updated to IMPLEMENTED/RESOLVED accordingly.
+
+## DEC-14 — `Case.stage` becomes a controlled enum matching sheet08's 15-stage narrative, not a value derived live from sub-entity status (Client Acceptance Remediation REQ-CASE-016, 2026-08-26)
+
+**Context**: Client Acceptance audit (REQ-CASE-016, MEDIUM) found `Case.stage` was unvalidated
+free text (`@IsString() @MaxLength(100)`) — any staff member with `cases:edit` could set it to
+any string via `PATCH /cases/:id/stage`, unrelated to the real, independently-gated sub-entity
+statuses (Assessment/Roadmap/Application/Offer/Scholarship/Visa/Enrollment each already enforce
+their own FSM — only this umbrella display label was unvalidated and could drift from reality).
+Live dev-DB check before touching anything: the field was essentially unused in practice — 2682
+of ~2711 rows were still the untouched default `'intake'`, 13 were `'assessment'`, 1 was
+`'counseling'`, 15 were `e2e_stage_marker` (inactive e2e-test-template artifacts).
+**Options**: (1) Derive `Case.stage` live from actual sub-entity status server-side (always
+accurate, but a much larger change — removes manual override entirely, requires querying every
+linked sub-entity on every read); (2) constrain it to a controlled enum matching sheet08's own
+15-stage narrative (re-parsed directly from the source XLSX this session), keeping it a manually
+set display label.
+**Decision**: Option 2 — client confirmed directly. New Prisma enum `CaseStage` (15 values:
+`LEAD_TO_CONTRACT` through `ARCHIVE`), `Case.stage String` → `Case.stage CaseStage @default(CONTRACT_SIGNING)`.
+**Reason (default value)**: A `Case` row only ever starts existing via
+`CasesService.createForStudent()` or `LeadsService`'s lead-conversion path — independently of
+Contract signing (REQ-CASE-002's own confirmed finding: Student/Case are created first, Contract
+links to them after). A freshly-created Case is therefore already past sheet08 stage 1 (which
+requires an eventual signed Contract) and not yet at stage 3 (Assessment hasn't started) —
+`CONTRACT_SIGNING` (stage 2) is the accurate default, replacing the old ad-hoc `'intake'`.
+**Migration**: hand-written SQL (`database/migrations/20260826090333_case_stage_enum/`) —
+`'intake'`/`'counseling'` → `CONTRACT_SIGNING`, `'assessment'` → `ASSESSMENT`, any other stray
+legacy value → `CONTRACT_SIGNING` fallback, before the column type change. Verified post-migration:
+2698 rows landed on `CONTRACT_SIGNING`, 13 on `ASSESSMENT` — matches the pre-migration count
+exactly (2682+15+1 = 2698).
+**Affected modules**: `database/schema.prisma`; `apps/api/src/modules/case-management/cases/{dto/create-case.dto.ts,dto/update-case-stage.dto.ts,cases.service.ts}`;
+`apps/api/src/modules/crm/leads/{dto/convert-lead.dto.ts,leads.service.ts}` (the other Case-creation
+path, found while implementing — Lead conversion can also create a Case directly); frontend
+`apps/web/lib/cases/types.ts`, `apps/web/components/crm/{status-badge.tsx,cases/case-stage-dialog.tsx}`
+(free-text `<Input>` → `<select>` dropdown of the 15 sheet08 stages), `apps/web/app/(staff)/cases/[id]/page.tsx`
+(renders the Vietnamese label, not the raw enum key).
+
+## DEC-15 — `SchoolMaster`: a new, minimal, separately-permissioned reference list, not folded into `admission_master` (Client Acceptance Remediation DEC-05(b), 2026-08-27)
+
+**Context**: `CLIENT_CLARIFICATION_SIGNOFF.md` DEC-05 (Student.school) had two open
+sub-questions the client answered directly: (4) store per academic year — already true,
+`AcademicRecord` is 1:N off `Case`, no code change needed; (3) "ưu tiên School Master, cho
+phép nhập trường chưa có" — genuinely new, `AcademicRecord.school` had no master-data
+backing at all before this.
+**Options considered**: (1) Fold this into the existing `admission_master` resource
+(University/Program/ScholarshipMaster); (2) a new, separate `school_master` resource/model.
+**Decision**: Option 2. `admission_master` is the client's own sheet-grouped outbound-
+admissions catalog (`01_MASTER_DATA.md`); School Master is an unrelated domestic-school list
+scoped only to Student Profile — folding it in would have muddied a resource whose grouping
+the client themselves defined. New minimal `SchoolMaster` model (`id`, `name` unique,
+`status`, timestamps) — deliberately **no business-code ID**, since sheet18/20 never names
+one for this entity and inventing one would be scope creep. `AcademicRecord.schoolMasterId`
+is an optional FK; `AcademicRecord.school` (unchanged, still required) is resolved
+server-side from the linked row's `name` when set (never trusted from the client, to avoid
+drift) and stays plain free text otherwise — the same "optional link to a master row, free
+text still allowed" idiom already used by `PartnerProgram.programId → Program`.
+**Permissions**: new `school_master` resource (`view`/`create`/`edit`), not reused from
+`profile_evidence` — this is master-data curation, not case-scoped counseling work. Grants
+mirror the project's own established "master-data curation is ED/DM-only" convention
+(`admission_master`, `visa_checklist_templates`): EXECUTIVE_DIRECTOR/DEPARTMENT_MANAGER get
+`create`/`edit`; CONSULTANT/DOCUMENT_SPECIALIST (whoever can touch `AcademicRecord`) get
+`view` only; no STUDENT_PARENT grant (internal staff data-entry aid, not portal-facing).
+**UI**: no dedicated admin page — client didn't ask for one. A new `SchoolPicker` component
+(modeled directly on the existing `ProgramPicker`) lets staff search-and-pick from the list
+inline inside the Academic Record dialog, or type a name with no match (kept as free text),
+or — if they hold `school_master:create` — add it to the master list right there via an
+inline "+ Thêm trường mới" affordance.
+**Migration**: hand-written SQL (`database/migrations/20260827034847_school_master/`) —
+new `school_masters` table + additive nullable `academic_records.school_master_id` FK column,
+no existing data touched.
+**Affected modules**: `database/schema.prisma`;
+`apps/api/src/modules/counseling/profile-evidence/{school-masters.service.ts,dto/{create,update}-school-master.dto.ts,profile-evidence.{controller,module}.ts,academic-records.service.ts,dto/{create,update}-academic-record.dto.ts}`;
+`database/seeds/seed.ts` (new `school_master` permission rows + per-role grants);
+frontend `apps/web/lib/school-masters/{types,api}.ts`,
+`apps/web/components/crm/profile-evidence/{school-picker.tsx,academic-record-dialog.tsx}`,
+`apps/web/lib/permissions/rbac-data.ts`, `apps/web/lib/profile-evidence/types.ts`.
+
+## DEC-16 — `CommissionTransaction.visaId`: reuse the existing `contractId` auto-resolution idiom, no new validation layer (Client Acceptance Remediation DEC-09, GAP-006, REQ-PARTNER-008, 2026-08-27)
+
+**Context**: This was the **last remaining HIGH-severity finding** in the client acceptance
+audit. Sheet16 lists Visa as a co-equal column with Contract/Application/Scholarship for
+commission traceability; the Contract and Scholarship legs were fixed in an earlier
+remediation phase (`CommissionTransaction.contractId`, `PartnerStudentLink.contractId`/
+`scholarshipApplicationId`), but Commission↔Visa was never built. The client answered DEC-09
+directly: *"Có, bắt buộc liên kết trực tiếp Hoa hồng ↔ Visa đối với các khoản hoa hồng phát
+sinh từ Visa. Không bắt buộc đối với các khoản hoa hồng không có nguồn từ Visa. visaId là
+nullable ở cấp dữ liệu nhưng bắt buộc theo loại nguồn hoa hồng."*
+**Options**: (1) A new dedicated validation layer enforcing "visaId required when
+sourceType==='Visa'" as an explicit DTO/service-level rule; (2) reuse the exact
+`resolveSource()` auto-resolution mechanism already proven for `contractId` — the field is
+populated (or not) purely as a side effect of which source type was actually used, no
+separate conditional-validation code needed.
+**Decision**: Option 2. Adding a `sourceType === 'Visa'` branch to `resolveSource()` that
+always looks up the real Visa (404 if missing) and returns `visaId` makes the field "required
+for Visa-sourced commissions, absent for others" fall out naturally — identical to how
+`contractId` already behaves for Contract/Payment sources. No new abstraction, no new
+permission, no new picker component (the create dialog already uses plain manual-UUID
+`sourceId` input for every source type).
+**Data model**: One additive-optional column, `CommissionTransaction.visaId String? @map(
+"visa_id")` + relation to `Visa`, migration `20260827060023_commission_transaction_visa_link`.
+**Reason (FIXED-basis-only constraint)**: `Visa` has no monetary field at all (no value/fee/
+amount) — a percentage-of-basis commission is mathematically impossible to compute from a
+Visa outcome. This is a technical consequence of the data model, not a new business rule
+being invented. `calculate()` only reads a source amount `if (rule.basis !== 'FIXED')`, so a
+FIXED-basis rule (a flat fee per successful visa) works with zero special-casing; a
+percentage-basis rule attached to a Visa-sourced transaction now fails explicitly with
+`COMMISSION_BASIS_MUST_BE_FIXED_FOR_VISA` instead of silently falling into the `Payment`
+lookup branch and failing with a misleading `PAYMENT_NOT_FOUND`.
+**Deliberately out of scope**: `PartnerStudentLink.visaId` — the original GAP-006
+recommendation named both `CommissionTransaction.visaId` and `PartnerStudentLink.visaId`, but
+the client's DEC-09 answer was scoped specifically to "Hoa hồng ↔ Visa" (Commission), not
+`PartnerStudentLink`. Not built here; a separate, still-open ask if the client wants it.
+**Affected modules**: `database/schema.prisma`;
+`apps/api/src/modules/partners/commission-transactions/{commission-transactions.service.ts,dto/create-commission-transaction.dto.ts}`;
+frontend `apps/web/lib/commission-transactions/types.ts`,
+`apps/web/components/crm/commission-transactions/commission-transaction-create-dialog.tsx`,
+`apps/web/app/(staff)/commission-transactions/[id]/page.tsx`. 5 new e2e tests in
+`apps/api/test/partners.e2e-spec.ts`.
+**Incidental fix found while validating this change**: `database/seeds/seed.ts`'s fixture
+Case A still set `stage: 'counseling'` (pre-dating DEC-14's `Case.stage` enum migration) —
+a TypeScript compile error that blocked re-running the seed script. Fixed to
+`'CONTRACT_SIGNING'`, matching DEC-14's own data-migration mapping for that legacy value; the
+live DB row itself was already correct (migrated by DEC-14), this only fixed the seed
+script's own source so it can run again.
+
+**Verification (2026-08-27, later same day):** Backend unit 209/209. Backend e2e 556/557 —
+the single failure (`rbac.e2e-spec.ts`'s case-member-scoped student-list test) was
+investigated directly against the DB and confirmed to be a pre-existing, unrelated flake:
+`demo.consultant.a` has accumulated 106+ active case memberships from repeated e2e runs
+against this session's never-reset persistent dev DB, pushing the original fixture student
+outside the default `GET /students?limit=100` page window — nothing to do with Commission or
+Visa. Not modified, since fixing a flaky unrelated test was out of scope here. Frontend
+vitest 325/325. **Live-browser-verified end-to-end**: created a real FIXED-basis
+`CommissionRule` (75 USD) for a real partner via the UI, created a `CommissionTransaction`
+with `sourceType=Visa` against a real fixture Visa via the create dialog, confirmed the
+detail page showed a new "Visa" row with a working `/visas/:id` link and `contractId` empty,
+confirmed `visaId`/`contractId`/`studentId`/`caseId` all correct via a direct DB query, then
+ran it through Xác nhận đủ điều kiện → Tính toán in the UI and confirmed the calculated
+amount (75.00 USD) matched the FIXED rule. Test data (the rule and the transaction) deleted
+afterward — no residue left in the DB.

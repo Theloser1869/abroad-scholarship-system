@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Case, Lead, LeadStatus, Prisma, Student } from '@prisma/client';
+import { Case, CaseStage, Lead, LeadStatus, Prisma, Student } from '@prisma/client';
 import { Principal } from '../../../common/context/principal';
 import { DEFAULT_PAGE_SIZE, PageMeta, PaginatedResult, parseSort } from '../../../common/dto/list-query.dto';
 import { IdGeneratorService } from '../../../common/id/id-generator.service';
@@ -238,7 +238,7 @@ export class LeadsService {
       const caseCode = await this.idGenerator.nextYearlyCode('CASE');
       const [createdCase] = await this.prisma.$transaction([
         this.prisma.case.create({
-          data: { caseCode, studentId: resolvedStudentId, ownerId: caseOwnerId, stage: dto.caseStage ?? 'intake' },
+          data: { caseCode, studentId: resolvedStudentId, ownerId: caseOwnerId, stage: dto.caseStage ?? CaseStage.CONTRACT_SIGNING },
         }),
         this.prisma.lead.update({ where: { id }, data: { status: 'CONVERTED', convertedStudentId: resolvedStudentId } }),
       ]);

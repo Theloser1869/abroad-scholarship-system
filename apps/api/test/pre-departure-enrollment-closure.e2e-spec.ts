@@ -214,11 +214,27 @@ describe('Pre-Departure + Enrollment + Closure (e2e)', () => {
     });
   });
 
+  /// Client Acceptance Remediation DEC-06/07/08 (2026-08-26) — closure moved from
+  /// `CasesService.close()` (`PATCH /cases/:id/close`) to the unified `ClosureService`
+  /// (`POST /cases/:id/closure/close`, standard executor = ADMIN_FINANCE/HCTH). These
+  /// preconditions (debt/tasks/visa/enrollment/pre-departure) are unchanged in substance —
+  /// only reachable through the new endpoint now, plus a 6th mandatory item (Document
+  /// Handover, DEC-07) that every "closure succeeds" case here must also confirm first.
+  /// Role/override/two-party-liquidation behavior itself is covered by
+  /// `case-closure.e2e-spec.ts`, not duplicated here.
   describe('Closure — validation gates', () => {
+    async function confirmHandover(caseId: string): Promise<void> {
+      const res = await request(app.getHttpServer())
+        .post(`/cases/${caseId}/closure/handover`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ recipientName: 'Gia đình học sinh' });
+      expect(res.status).toBe(201);
+    }
+
     it('OUTSTANDING_DEBT_REMAINS blocks closure while a payment is unresolved', async () => {
       const { studentId, caseId } = await createCaseForConsultant();
       await signContractForCase(studentId);
-      const res = await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${directorToken}`).send({ closureReason: 'Attempting closure with unpaid balance.' });
+      const res = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'Attempting closure with unpaid balance.' });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('OUTSTANDING_DEBT_REMAINS');
     });
@@ -226,24 +242,25 @@ describe('Pre-Departure + Enrollment + Closure (e2e)', () => {
     it('VISA_IN_PROGRESS blocks closure while a non-terminal Visa exists', async () => {
       const { caseId } = await createCaseForConsultant();
       await request(app.getHttpServer()).post(`/cases/${caseId}/visas`).set('Authorization', `Bearer ${consultantAToken}`).send({ countryCode: 'US', visaType: `F-1-${randomUUID()}` });
-      const res = await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${directorToken}`).send({ closureReason: 'Attempting closure with an open visa.' });
+      const res = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'Attempting closure with an open visa.' });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('VISA_IN_PROGRESS');
     });
 
-    it('closure succeeds once the Visa reaches a terminal status (Withdrawn)', async () => {
+    it('closure succeeds once the Visa reaches a terminal status (Withdrawn) and handover is confirmed', async () => {
       const { caseId } = await createCaseForConsultant();
       const visaRes = await request(app.getHttpServer()).post(`/cases/${caseId}/visas`).set('Authorization', `Bearer ${consultantAToken}`).send({ countryCode: 'US', visaType: `F-1-${randomUUID()}` });
       await request(app.getHttpServer()).patch(`/visas/${visaRes.body.id}/status`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'WITHDRAWN' });
-      const res = await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${directorToken}`).send({ closureReason: 'Visa withdrawn, no other blockers.' });
-      expect(res.status).toBe(200);
+      await confirmHandover(caseId);
+      const res = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'Visa withdrawn, no other blockers.' });
+      expect(res.status).toBe(201);
       expect(res.body.status).toBe('CLOSED');
     });
 
     it('ENROLLMENT_NOT_CONFIRMED blocks closure once admission was attempted but nothing is confirmed', async () => {
       const { caseId } = await createCaseForConsultant();
       await request(app.getHttpServer()).post(`/cases/${caseId}/applications`).set('Authorization', `Bearer ${consultantAToken}`).send({ programId: programAId });
-      const res = await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${directorToken}`).send({ closureReason: 'Attempting closure with unresolved admission.' });
+      const res = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'Attempting closure with unresolved admission.' });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('ENROLLMENT_NOT_CONFIRMED');
     });
@@ -251,18 +268,26 @@ describe('Pre-Departure + Enrollment + Closure (e2e)', () => {
     it('PRE_DEPARTURE_CHECKLIST_INCOMPLETE blocks closure while a required item is open', async () => {
       const { caseId } = await createCaseForConsultant();
       await request(app.getHttpServer()).post(`/cases/${caseId}/pre-departure`).set('Authorization', `Bearer ${consultantAToken}`).send({ title: 'Confirm accommodation', category: 'accommodation', required: true });
-      const res = await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${directorToken}`).send({ closureReason: 'Attempting closure with an open pre-departure item.' });
+      const res = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'Attempting closure with an open pre-departure item.' });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('PRE_DEPARTURE_CHECKLIST_INCOMPLETE');
     });
 
-    it('a case with no Contract/Visa/Application/pre-departure activity at all still closes cleanly (Phase 04 regression)', async () => {
+    it('DOCUMENT_HANDOVER_INCOMPLETE blocks closure until handover is explicitly confirmed (DEC-07, never auto-N/A)', async () => {
       const { caseId } = await createCaseForConsultant();
-      const res = await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${directorToken}`).send({ closureReason: 'No admission/visa/contract activity — closed early.' });
-      expect(res.status).toBe(200);
+      const res = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'No handover recorded yet.' });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('DOCUMENT_HANDOVER_INCOMPLETE');
     });
 
-    it('full happy path: debt settled, visa granted, enrollment confirmed, pre-departure complete — closure succeeds', async () => {
+    it('a case with no Contract/Visa/Application/pre-departure activity at all still closes cleanly once handover is confirmed', async () => {
+      const { caseId } = await createCaseForConsultant();
+      await confirmHandover(caseId);
+      const res = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'No admission/visa/contract activity — closed early.' });
+      expect(res.status).toBe(201);
+    });
+
+    it('full happy path: debt settled, visa granted, enrollment confirmed, pre-departure complete, handover confirmed — closure succeeds and syncs the linked Contract to COMPLETED', async () => {
       const { studentId, caseId } = await createCaseForConsultant();
 
       // Debt settled.
@@ -277,6 +302,7 @@ describe('Pre-Departure + Enrollment + Closure (e2e)', () => {
         .set('Authorization', `Bearer ${financeToken}`)
         .send({ installmentNo: 1, amount: 500, currency: 'USD', dueDate: '2026-12-01' });
       await request(app.getHttpServer()).post(`/payments/${paymentRes.body.id}/record`).set('Authorization', `Bearer ${financeToken}`).send({ amount: 500 });
+      await request(app.getHttpServer()).patch(`/contracts/${contract.id}/status`).set('Authorization', `Bearer ${financeToken}`).send({ status: 'ACTIVE' });
 
       // Visa granted.
       const visaRes = await request(app.getHttpServer()).post(`/cases/${caseId}/visas`).set('Authorization', `Bearer ${consultantAToken}`).send({ countryCode: 'US', visaType: `F-1-${randomUUID()}` });
@@ -294,24 +320,33 @@ describe('Pre-Departure + Enrollment + Closure (e2e)', () => {
       const item = await request(app.getHttpServer()).post(`/cases/${caseId}/pre-departure`).set('Authorization', `Bearer ${consultantAToken}`).send({ title: 'Book flight', category: 'flight', required: true });
       await request(app.getHttpServer()).patch(`/pre-departure-items/${item.body.id}`).set('Authorization', `Bearer ${consultantAToken}`).send({ status: 'DONE' });
 
-      const closeRes = await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${directorToken}`).send({ closureReason: 'All Phase 09 conditions satisfied.' });
-      expect(closeRes.status).toBe(200);
+      // Document handover confirmed (DEC-07).
+      await confirmHandover(caseId);
+
+      const closeRes = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'All conditions satisfied.' });
+      expect(closeRes.status).toBe(201);
       expect(closeRes.body.status).toBe('CLOSED');
       expect(closeRes.body.closedAt).not.toBeNull();
+
+      // DEC-06 — Case→CLOSED and the linked Contract→COMPLETED happen in one transaction.
+      const contractAfter = await prisma.contract.findUniqueOrThrow({ where: { id: contract.id } });
+      expect(contractAfter.status).toBe('COMPLETED');
+      expect(contractAfter.completedAt).not.toBeNull();
     });
 
-    it('an unauthorized caller (consultant.b, not a case member) is denied (404), not a partial precondition error', async () => {
+    it('an unauthorized caller (consultant.b, no case-closure:execute grant) is denied (403)', async () => {
       const { caseId } = await createCaseForConsultant();
-      const res = await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${consultantBToken}`).send({ closureReason: 'unauthorized attempt' });
-      expect(res.status).toBe(404);
+      const res = await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${consultantBToken}`).send({ closureReason: 'unauthorized attempt' });
+      expect(res.status).toBe(403);
     });
   });
 
   describe('audit', () => {
     it('creates an ARCHIVE audit record for a successful closure', async () => {
       const { caseId } = await createCaseForConsultant();
-      await request(app.getHttpServer()).patch(`/cases/${caseId}/close`).set('Authorization', `Bearer ${directorToken}`).send({ closureReason: 'Audit check.' });
-      const row = await prisma.auditLog.findFirst({ where: { action: 'ARCHIVE', objectType: 'Cases', objectId: caseId }, orderBy: { createdAt: 'desc' } });
+      await request(app.getHttpServer()).post(`/cases/${caseId}/closure/handover`).set('Authorization', `Bearer ${financeToken}`).send({});
+      await request(app.getHttpServer()).post(`/cases/${caseId}/closure/close`).set('Authorization', `Bearer ${financeToken}`).send({ closureReason: 'Audit check.' });
+      const row = await prisma.auditLog.findFirst({ where: { action: 'ARCHIVE', objectType: 'Closure', objectId: caseId }, orderBy: { createdAt: 'desc' } });
       expect(row).not.toBeNull();
       expect(row?.result).toBe('SUCCESS');
     });

@@ -53,7 +53,10 @@ function makeStudent(overrides: Partial<Student> = {}): Student {
 
 describe("StudentsPage — list", () => {
   it("shows the forbidden state for a role without students:view", () => {
-    authState.principal = { userId: "u1", roleCode: "SALES_MARKETING" };
+    // SALES_MARKETING now holds view-only `students:view` (client permission-matrix
+    // remediation, 2026-08-25) — SYSTEM_ADMIN is a role with genuinely zero `students`
+    // grant, matching the backend's own `rbac.e2e-spec.ts` choice.
+    authState.principal = { userId: "u1", roleCode: "SYSTEM_ADMIN" };
     renderWithProviders(<StudentsPage />);
 
     expect(screen.getByText("Không có quyền truy cập.")).toBeInTheDocument();

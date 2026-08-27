@@ -25,7 +25,7 @@ export const COMMISSION_TRANSACTION_TRANSITIONS: Record<CommissionTransactionSta
   CANCELLED: [],
 };
 
-export type CommissionSourceType = "Contract" | "Payment";
+export type CommissionSourceType = "Contract" | "Payment" | "Visa";
 
 export interface CommissionTransactionPartnerSummary {
   id: string;
@@ -50,6 +50,8 @@ export interface CommissionTransaction {
   applicationId: string | null;
   /** Client Acceptance Remediation GAP-006 — auto-resolved from sourceType/sourceId at create() time, never client-supplied. */
   contractId: string | null;
+  /** Client Acceptance Remediation DEC-09 (2026-08-27) — same auto-resolution, required for sourceType==='Visa', null otherwise. */
+  visaId: string | null;
   sourceType: CommissionSourceType;
   sourceId: string | null;
   basis: string | null;

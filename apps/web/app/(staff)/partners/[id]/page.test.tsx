@@ -150,6 +150,7 @@ function makeTransaction(overrides: Partial<CommissionTransaction> = {}): Commis
     caseId: null,
     applicationId: null,
     contractId: null,
+    visaId: null,
     sourceType: "Payment",
     sourceId: "payment-12345678",
     basis: null,
@@ -169,7 +170,9 @@ function makeTransaction(overrides: Partial<CommissionTransaction> = {}): Commis
 
 describe("PartnerDetailContent — PartnerProgram/PartnerDocument/PartnerStudentLink render as sections with Dialogs (no standalone route); Commission Rules links out to its own route", () => {
   it("shows the forbidden state for a role without partner:view", async () => {
-    authState.principal = { userId: "u1", roleCode: "CONSULTANT" };
+    // CONSULTANT now holds view-only `partner:view` (client permission-matrix remediation,
+    // 2026-08-25) — SALES_MARKETING has no `partner` grant at all.
+    authState.principal = { userId: "u1", roleCode: "SALES_MARKETING" };
     renderWithProviders(
       <RequirePermission resource="partner" action="view">
         <PartnerDetailContent id="partner-1" />

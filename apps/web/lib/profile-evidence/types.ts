@@ -9,9 +9,12 @@ export interface AcademicRecord {
   id: string;
   caseId: string;
   school: string;
+  /** Client Acceptance Remediation DEC-05(b) — optional link to a curated SchoolMaster row; null means `school` is free text. */
+  schoolMasterId: string | null;
   period: string;
-  /** Client Acceptance Remediation GAP-004 — required (with gpa) before Assessment approval (409 STUDENT_PROFILE_INCOMPLETE). */
+  /** Client Acceptance Remediation GAP-004 — required before Assessment approval (409 STUDENT_PROFILE_INCOMPLETE). */
   grade: string | null;
+  /** GPA is Optional per client decision (2026-08-25, CONFLICT-004) — not part of the Assessment-approval gate. */
   gpa: string | null;
   gradingScale: string | null;
   evidenceDocumentId: string | null;
@@ -85,6 +88,7 @@ export interface Activity {
   endAt: string | null;
   hours: string | null;
   impact: string | null;
+  award: string | null;
   verifierName: string | null;
   verifiedById: string | null;
   verifiedAt: string | null;
@@ -95,6 +99,7 @@ export interface Activity {
 
 export interface CreateAcademicRecordInput {
   school: string;
+  schoolMasterId?: string;
   period: string;
   grade?: string;
   gpa?: number;
@@ -155,6 +160,7 @@ export interface CreateActivityInput {
   endAt?: string;
   hours?: number;
   impact?: string;
+  award?: string;
   verifierName?: string;
   evidenceDocumentId?: string;
 }

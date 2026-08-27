@@ -59,7 +59,15 @@ const PERMISSIONS: { resource: string; action: string }[] = [
   { resource: 'cases', action: 'view' },
   { resource: 'cases', action: 'edit' },
   { resource: 'cases', action: 'assign' },
-  { resource: 'cases', action: 'close' },
+  // Client Acceptance Remediation DEC-06/07/08 (GAP-007, REQ-CASE-014, 2026-08-26) — the
+  // old `cases:close` permission is retired: closure is now a dedicated, unified workflow
+  // (`case-closure`), not a `cases` action. ADMIN_FINANCE (HCTH) is the standard executor
+  // (`execute`); EXECUTIVE_DIRECTOR/DEPARTMENT_MANAGER may use the same `execute` action as
+  // an audited exception (`ClosureService` requires an `overrideReason` from them, never a
+  // second/weaker permission); CONSULTANT may only `request`. `view` is granted to all four.
+  { resource: 'case-closure', action: 'view' },
+  { resource: 'case-closure', action: 'request' },
+  { resource: 'case-closure', action: 'execute' },
   { resource: 'leads', action: 'view' },
   { resource: 'leads', action: 'create' },
   { resource: 'leads', action: 'edit' },
@@ -115,6 +123,13 @@ const PERMISSIONS: { resource: string; action: string }[] = [
   { resource: 'profile_evidence', action: 'view' },
   { resource: 'profile_evidence', action: 'create' },
   { resource: 'profile_evidence', action: 'edit' },
+  // Client Acceptance Remediation DEC-05(b) (2026-08-27) — a separate resource from
+  // `profile_evidence` because this is master-data curation (a shared, staff-wide school
+  // list), not case-scoped counseling work; view is broad, create/edit is ED/DM-only,
+  // mirroring the exact `admission_master`/`visa_checklist_templates` convention below.
+  { resource: 'school_master', action: 'view' },
+  { resource: 'school_master', action: 'create' },
+  { resource: 'school_master', action: 'edit' },
   { resource: 'writing', action: 'view' },
   { resource: 'writing', action: 'create' },
   { resource: 'writing', action: 'edit' },
@@ -220,7 +235,10 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
     { resource: 'cases', action: 'view' },
     { resource: 'cases', action: 'edit' },
     { resource: 'cases', action: 'assign' },
-    { resource: 'cases', action: 'close' },
+    // DEC-06 — GĐĐH may exercise the audited exception path (ClosureService requires an
+    // overrideReason from this role, never a weaker check), not a standalone closure path.
+    { resource: 'case-closure', action: 'view' },
+    { resource: 'case-closure', action: 'execute' },
     { resource: 'leads', action: 'view' },
     { resource: 'leads', action: 'create' },
     { resource: 'leads', action: 'edit' },
@@ -263,6 +281,9 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
     { resource: 'profile_evidence', action: 'view' },
     { resource: 'profile_evidence', action: 'create' },
     { resource: 'profile_evidence', action: 'edit' },
+    { resource: 'school_master', action: 'view' },
+    { resource: 'school_master', action: 'create' },
+    { resource: 'school_master', action: 'edit' },
     { resource: 'writing', action: 'view' },
     { resource: 'writing', action: 'create' },
     { resource: 'writing', action: 'edit' },
@@ -337,7 +358,9 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
     { resource: 'cases', action: 'view' },
     { resource: 'cases', action: 'edit' },
     { resource: 'cases', action: 'assign' },
-    { resource: 'cases', action: 'close' },
+    // DEC-06 — same audited exception path as EXECUTIVE_DIRECTOR (see its own grant above).
+    { resource: 'case-closure', action: 'view' },
+    { resource: 'case-closure', action: 'execute' },
     { resource: 'leads', action: 'view' },
     { resource: 'leads', action: 'create' },
     { resource: 'leads', action: 'edit' },
@@ -372,6 +395,9 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
     { resource: 'profile_evidence', action: 'view' },
     { resource: 'profile_evidence', action: 'create' },
     { resource: 'profile_evidence', action: 'edit' },
+    { resource: 'school_master', action: 'view' },
+    { resource: 'school_master', action: 'create' },
+    { resource: 'school_master', action: 'edit' },
     { resource: 'writing', action: 'view' },
     { resource: 'writing', action: 'create' },
     { resource: 'writing', action: 'edit' },
@@ -435,18 +461,21 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
   ],
   // CASE_MEMBER scope — see docs/security/RBAC_MATRIX.md. No `create`: Student rows are
   // created via Lead conversion (04-core-crm/01_LEAD.md), not directly by a consultant.
-  // cases:edit/assign/close are granted at role level but narrowed by
-  // CasesService.assertManageable to "must be the case's OWNER member", not just any
-  // member — see that method's doc comment. Task grants mirror Case's (CASE_MEMBER scope,
-  // same reasoning) — full view/create/edit/assign, narrowed per-task by
-  // TasksService.requireManageable the same way.
+  // cases:edit/assign are granted at role level but narrowed by CasesService.
+  // assertManageable to "must be the case's OWNER member", not just any member — see that
+  // method's doc comment. Task grants mirror Case's (CASE_MEMBER scope, same reasoning) —
+  // full view/create/edit/assign, narrowed per-task by TasksService.requireManageable the
+  // same way. DEC-06 (GAP-007, 2026-08-26): Consultant may only `request` closure
+  // (advisory — ClosureService.requestClosure, narrowed to case-owner) — never `execute`;
+  // the old `cases:close` grant is retired.
   CONSULTANT: [
     { resource: 'students', action: 'view' },
     { resource: 'students', action: 'edit' },
     { resource: 'cases', action: 'view' },
     { resource: 'cases', action: 'edit' },
     { resource: 'cases', action: 'assign' },
-    { resource: 'cases', action: 'close' },
+    { resource: 'case-closure', action: 'view' },
+    { resource: 'case-closure', action: 'request' },
     { resource: 'tasks', action: 'view' },
     { resource: 'tasks', action: 'create' },
     { resource: 'tasks', action: 'edit' },
@@ -464,6 +493,7 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
     { resource: 'profile_evidence', action: 'view' },
     { resource: 'profile_evidence', action: 'create' },
     { resource: 'profile_evidence', action: 'edit' },
+    { resource: 'school_master', action: 'view' },
     { resource: 'writing', action: 'view' },
     { resource: 'writing', action: 'create' },
     { resource: 'writing', action: 'edit' },
@@ -505,10 +535,15 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
     { resource: 'enrollment', action: 'view' },
     { resource: 'enrollment', action: 'create' },
     { resource: 'enrollment', action: 'edit' },
-    // Phase 10 — deliberately ZERO grant. 10-partners/01_PARTNER_CRM.md's own RBAC
-    // callout: "Consultant không mặc định được xem commission/partner commercial terms."
-    // Partner CRM/Commission is a business-development/finance function outside
-    // Consultant's SRS-defined counseling domain — see docs/ASSUMPTIONS.md ASM-43.
+    // Phase 10 — Commission/PartnerProgram/PartnerDocument/PartnerStudentLink stay ZERO:
+    // 10-partners/01_PARTNER_CRM.md's own RBAC callout ("Consultant không mặc định được
+    // xem commission/partner commercial terms" — see docs/ASSUMPTIONS.md ASM-43) still
+    // holds for those. `partner:view` (base Partner CRM directory) is the one exception,
+    // added per the client's own permission matrix (sheet03 Phan_quyen_module row
+    // "Partner CRM": Tư vấn = "Xem") — confirmed via live RBAC re-audit that this cell was
+    // actually zero, not restricted, contradicting the matrix. View-only, matching the
+    // matrix's "Xem," not "Có".
+    { resource: 'partner', action: 'view' },
     { resource: 'reports', action: 'view' },
   ],
   // DOCUMENT_SPECIALIST is narrower than CONSULTANT on CASE management specifically (no
@@ -534,6 +569,7 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
     { resource: 'assessments', action: 'view' },
     { resource: 'roadmaps', action: 'view' },
     { resource: 'profile_evidence', action: 'view' },
+    { resource: 'school_master', action: 'view' },
     { resource: 'writing', action: 'view' },
     { resource: 'documents', action: 'view' },
     { resource: 'documents', action: 'create' },
@@ -577,13 +613,20 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
   ],
   // OWN_LEAD scope (docs/security/RBAC_MATRIX.md) — this is Sales/Marketing's core
   // domain (SRS section 3: "Lead, nguồn lead, campaign, referral"). Still deliberately NO
-  // students/cases grant — SRS: "Không passport, tài chính, visa, tài liệu nhạy cảm".
+  // students:edit/cases grant — SRS: "Không passport, tài chính, visa, tài liệu nhạy cảm",
+  // and FieldPolicyService.redactStudent still strips Student.budget from this role
+  // regardless of the view grant below.
   SALES_MARKETING: [
     { resource: 'leads', action: 'view' },
     { resource: 'leads', action: 'create' },
     { resource: 'leads', action: 'edit' },
     { resource: 'leads', action: 'assign' },
     { resource: 'leads', action: 'convert' },
+    // `students:view` added per the client's own permission matrix (sheet03
+    // Phan_quyen_module row "Student Profile": Sale/Marketing = "Hạn chế") — confirmed via
+    // live RBAC re-audit that this cell was actually zero, not restricted. View-only,
+    // matching the matrix's "Hạn chế," not "Có"; sensitive fields (budget) still redacted.
+    { resource: 'students', action: 'view' },
     // Phase 08 — "Sales/Marketing không mặc nhiên được xem application/visa-sensitive
     // data": zero grant on UniversityChoice/Application/Offer/ScholarshipApplication
     // (all Student/Case-scoped transaction data). `admission_master:view` only — the
@@ -611,6 +654,24 @@ const GRANTS: Record<RoleCode, { resource: string; action: string }[]> = {
   // an execution one (mirrors "Không tự suy diễn requirement" — SRS doesn't say HCTH
   // approves its own contracts).
   ADMIN_FINANCE: [
+    // Client Acceptance Remediation DEC-06 (GAP-007, REQ-CASE-014, 2026-08-26) — HCTH is
+    // the standard executing actor of the unified Closure/Liquidation workflow ("HCTH:
+    // Hợp đồng... công nợ, thanh lý" already named it as owner; the client's fresh decision
+    // now also makes it the sole standard executor of Đóng hồ sơ). A NEW, narrow
+    // `case-closure` permission, not a broadened `cases:*` grant (which stays NONE-scoped
+    // for this role) — see docs/requirements/CLOSURE_LIQUIDATION_DESIGN.md "Implementation
+    // Assumption #3" for why. `ClosureService` does its own record-level authorization
+    // (any Case, since Closure genuinely is this role's whole domain), not
+    // `ScopePolicyService.assertCaseAccessible`.
+    { resource: 'case-closure', action: 'view' },
+    { resource: 'case-closure', action: 'execute' },
+    // `students:view` and `visa:view` added per the client's own permission matrix (sheet03
+    // Phan_quyen_module rows "Student Profile" and "Visa": HCTH = "Hạn chế" on both) —
+    // confirmed via live RBAC re-audit that both cells were actually zero, not restricted.
+    // View-only, matching the matrix's "Hạn chế," not "Có"; FieldPolicyService.redactStudent
+    // still strips Student.budget from this role regardless of the view grant.
+    { resource: 'students', action: 'view' },
+    { resource: 'visa', action: 'view' },
     { resource: 'contracts', action: 'view' },
     { resource: 'contracts', action: 'create' },
     { resource: 'contracts', action: 'edit' },
@@ -871,7 +932,7 @@ async function seedRbacFixtures(roleByCode: Map<RoleCode, string>): Promise<void
       caseCode: 'CASE-2026-90001',
       studentId: studentA.id,
       ownerId: userIdByUsername.get('demo.consultant.a')!,
-      stage: 'counseling',
+      stage: 'CONTRACT_SIGNING',
       status: 'ACTIVE',
     },
   });

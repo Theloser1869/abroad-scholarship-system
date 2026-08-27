@@ -7,12 +7,11 @@ import { listStudents } from "@/lib/students/api";
 import { useDebouncedValue } from "@/lib/utils/use-debounced-value";
 import { Input } from "@/components/ui/input";
 
-/// Same pattern as `UserPicker` (F03) — `GET /students` is `students:view`-gated, and
-/// ADMIN_FINANCE (the role that actually creates Contracts day-to-day) holds zero `students`
-/// grant at all (docs/frontend/FRONTEND_PERMISSION_MAP.md — Contract/Payment scope is
-/// deliberately separate from Student/Case scope). Degrades to a manual UUID input for any
-/// role without `students:view`, documented limitation, never a workaround calling a
-/// different endpoint.
+/// Same pattern as `UserPicker` (F03) — `GET /students` is `students:view`-gated. Degrades
+/// to a manual UUID input for any role without `students:view` (documented limitation,
+/// never a workaround calling a different endpoint) — SALES_MARKETING/SYSTEM_ADMIN are the
+/// remaining zero-grant roles; ADMIN_FINANCE gained a view-only `students:view` grant in the
+/// 2026-08-25 client permission-matrix remediation, so it now sees the real search/select UI.
 export function StudentPicker({ value, onChange, label }: { value: string; onChange: (studentId: string) => void; label: string }) {
   const { can } = usePermissions();
   const [search, setSearch] = useState("");

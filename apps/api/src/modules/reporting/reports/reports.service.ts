@@ -6,6 +6,8 @@ import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ScopePolicyService } from '../../identity/rbac/scope-policy.service';
 import { PaymentsService } from '../../commercial/payments/payments.service';
 import { TasksService } from '../../case-management/tasks/tasks.service';
+import { AssessmentsService } from '../../counseling/assessments/assessments.service';
+import { VisaStatusService } from '../../visa/visa-status/visa-status.service';
 
 /// Mirrors `TasksService`'s own private `TERMINAL_STATUSES` constant (not exported) — a
 /// query-filter value, not a re-derivation of task-completion business logic.
@@ -26,6 +28,8 @@ export class ReportsService {
     private readonly scope: ScopePolicyService,
     private readonly payments: PaymentsService,
     private readonly tasks: TasksService,
+    private readonly assessments: AssessmentsService,
+    private readonly visaStatus: VisaStatusService,
   ) {}
 
   /// EXECUTIVE_DIRECTOR/DEPARTMENT_MANAGER only — the same narrow role-check pattern
@@ -35,17 +39,42 @@ export class ReportsService {
   async executiveDashboard(principal: Principal) {
     this.assertRole(principal, ['EXECUTIVE_DIRECTOR', 'DEPARTMENT_MANAGER']);
 
-    const [activeCases, pipeline, payments, applications, scholarships, visas, enrollments, closure, tasks] = await Promise.all([
-      this.prisma.case.count({ where: { status: { in: [...CASE_OPEN_STATUSES] } } }),
-      this.prisma.case.groupBy({ by: ['status'], _count: true }),
-      this.prisma.payment.findMany({ select: { amount: true, paidAmount: true, refundedAmount: true, currency: true, status: true, dueDate: true } }),
-      this.prisma.application.groupBy({ by: ['status'], _count: true }),
-      this.prisma.scholarshipApplication.groupBy({ by: ['status'], _count: true }),
-      this.prisma.visa.groupBy({ by: ['status'], _count: true }),
-      this.prisma.enrollment.groupBy({ by: ['status'], _count: true }),
-      this.prisma.case.count({ where: { status: { in: ['CLOSED', 'ARCHIVED'] } } }),
-      this.prisma.task.findMany({ where: { status: { notIn: [...TASK_TERMINAL_STATUSES] } }, select: { status: true, deadline: true } }),
+    const [activeCaseIds, pipeline, payments, applications, scholarships, visas, enrollments, closure, tasks, writingArtifacts, lorRecords] =
+      await Promise.all([
+        this.prisma.case.findMany({ where: { status: { in: [...CASE_OPEN_STATUSES] } }, select: { id: true } }),
+        this.prisma.case.groupBy({ by: ['status'], _count: true }),
+        this.prisma.payment.findMany({ select: { amount: true, paidAmount: true, refundedAmount: true, currency: true, status: true, dueDate: true } }),
+        this.prisma.application.groupBy({ by: ['status'], _count: true }),
+        this.prisma.scholarshipApplication.groupBy({ by: ['status'], _count: true }),
+        this.prisma.visa.groupBy({ by: ['status'], _count: true }),
+        this.prisma.enrollment.groupBy({ by: ['status'], _count: true }),
+        this.prisma.case.count({ where: { status: { in: ['CLOSED', 'ARCHIVED'] } } }),
+        this.prisma.task.findMany({ where: { status: { notIn: [...TASK_TERMINAL_STATUSES] } }, select: { status: true, deadline: true } }),
+        this.prisma.writingArtifact.findMany({ select: { status: true } }),
+        this.prisma.letterOfRecommendation.findMany({ select: { submissionStatus: true } }),
+      ]);
+    const activeCases = activeCaseIds.length;
+
+    // sheet06 (Task_KPI) rows 6/9-12/14 — "Hồ sơ hoàn chỉnh %", "Writing hoàn thành" (Essay/
+    // Resume/SOP merged into one count — `WritingArtifact.type` is free text with no
+    // controlled vocabulary, so a per-type split would be an invented, unreliable
+    // classification; see docs/ASSUMPTIONS.md), "LOR hoàn tất", "Checklist hoàn tất"
+    // (pre-departure). Each reuses its metric's single existing source of truth —
+    // `AssessmentsService.countProfileCompleteness` mirrors the exact same 6 conditions as
+    // `assertStudentProfileComplete`, `VisaStatusService.countPreDepartureChecklistCompletion`
+    // mirrors `hasIncompletePreDepartureChecklist` — never a second/diverging calculation.
+    const [profileCompleteness, preDepartureChecklistCompletion] = await Promise.all([
+      this.assessments.countProfileCompleteness(activeCaseIds.map((c) => c.id)),
+      this.visaStatus.countPreDepartureChecklistCompletion(),
     ]);
+    const writingCompleted = {
+      total: writingArtifacts.length,
+      complete: writingArtifacts.filter((w) => w.status === 'FINAL' || w.status === 'SUBMITTED').length,
+    };
+    const lorCompleted = {
+      total: lorRecords.length,
+      complete: lorRecords.filter((l) => l.submissionStatus === 'SUBMITTED').length,
+    };
 
     // Phase 14 fix (Final Architect Review finding) — Payment/Contract carry a per-record
     // `currency` (SRS §6.16, deliberately no single agency currency — different
@@ -78,6 +107,7 @@ export class ReportsService {
       visas: visas.map((v) => ({ status: v.status, count: v._count })),
       enrollments: enrollments.map((e) => ({ status: e.status, count: e._count })),
       closedOrArchivedCases: closure,
+      kpi: { profileCompleteness, writingCompleted, lorCompleted, preDepartureChecklistCompletion },
     };
   }
 
@@ -89,9 +119,12 @@ export class ReportsService {
   async managerDashboard(principal: Principal) {
     this.assertRole(principal, ['EXECUTIVE_DIRECTOR', 'DEPARTMENT_MANAGER']);
 
-    const tasks = await this.prisma.task.findMany({
-      select: { ownerId: true, status: true, deadline: true, updatedAt: true, qualityScore: true },
-    });
+    const [tasks, activeCasesByOwner] = await Promise.all([
+      this.prisma.task.findMany({ select: { ownerId: true, status: true, deadline: true, updatedAt: true, qualityScore: true } }),
+      this.prisma.case.groupBy({ by: ['ownerId'], where: { status: { in: [...CASE_OPEN_STATUSES] } }, _count: true }),
+    ]);
+    const activeCaseCountByOwner = new Map(activeCasesByOwner.map((c) => [c.ownerId, c._count]));
+
     const byOwner = new Map<string, { open: number; overdue: number; done: number; onTimeDone: number; qualitySum: number; qualityCount: number }>();
     for (const t of tasks) {
       const bucket = byOwner.get(t.ownerId) ?? { open: 0, overdue: 0, done: 0, onTimeDone: 0, qualitySum: 0, qualityCount: 0 };
@@ -113,14 +146,27 @@ export class ReportsService {
       }
       byOwner.set(t.ownerId, bucket);
     }
+    // sheet06 row3 ("Case đang phụ trách") — an owner with active cases but zero tasks still
+    // needs a workload row (all-zero task metrics, real case count), not to be silently
+    // dropped from the table.
+    for (const ownerId of activeCaseCountByOwner.keys()) {
+      if (!byOwner.has(ownerId)) byOwner.set(ownerId, { open: 0, overdue: 0, done: 0, onTimeDone: 0, qualitySum: 0, qualityCount: 0 });
+    }
 
-    const workload = [...byOwner.entries()].map(([ownerId, b]) => ({
-      ownerId,
-      openTasks: b.open,
-      overdueTasks: b.overdue,
-      onTimeCompletionRate: b.done > 0 ? Number((b.onTimeDone / b.done).toFixed(2)) : null,
-      averageQualityScore: b.qualityCount > 0 ? Number((b.qualitySum / b.qualityCount).toFixed(1)) : null,
-    }));
+    const workload = [...byOwner.entries()].map(([ownerId, b]) => {
+      const activeCases = activeCaseCountByOwner.get(ownerId) ?? 0;
+      return {
+        ownerId,
+        openTasks: b.open,
+        overdueTasks: b.overdue,
+        onTimeCompletionRate: b.done > 0 ? Number((b.onTimeDone / b.done).toFixed(2)) : null,
+        averageQualityScore: b.qualityCount > 0 ? Number((b.qualitySum / b.qualityCount).toFixed(1)) : null,
+        // sheet06 row3/row4 ("Case đang phụ trách", "Task/case") — reuses this same `open`
+        // task count (never a second definition of "open tasks").
+        activeCases,
+        tasksPerCase: activeCases > 0 ? Number((b.open / activeCases).toFixed(2)) : null,
+      };
+    });
 
     const upcomingApplicationDeadlines = await this.prisma.application.count({
       where: { status: { notIn: ['OFFER', 'REJECT', 'WITHDRAWN'] } },

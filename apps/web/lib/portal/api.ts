@@ -5,7 +5,9 @@ import type { NotificationRecord } from "../notifications/types";
 import type { RoadmapMilestone } from "../roadmaps/types";
 import type {
   PortalApplicationDetail,
+  PortalClosureStatus,
   PortalListParams,
+  PortalLiquidationStatus,
   PortalMeResponse,
   PortalProfile,
   PortalRoadmap,
@@ -132,4 +134,18 @@ export function listPortalContractPayments(studentId: string, contractId: string
 /// `markNotificationRead`, F07's `lib/notifications/notifications-api.ts`, already reaches).
 export function listPortalNotifications(studentId: string, params: PortalListParams): Promise<PaginatedResponse<NotificationRecord>> {
   return apiFetch<PaginatedResponse<NotificationRecord>>(`/portal/students/${studentId}/notifications`, { query: params });
+}
+
+/// Client Acceptance Remediation DEC-06/07/08 (GAP-007) — read-only closure summary
+/// (`PortalService.getClosure` strips `handover.notes`, the one field that might carry
+/// internal staff commentary — every other field is already student/parent-safe).
+export function getPortalClosure(studentId: string): Promise<PortalClosureStatus> {
+  return apiFetch<PortalClosureStatus>(`/portal/students/${studentId}/closure`);
+}
+
+/// DEC-08 — the student/parent side of the two-party liquidation confirmation. Only
+/// reachable once the linked Case is CLOSED; the acting party (self or an ACTIVE linked
+/// parent) is resolved server-side, never client-supplied.
+export function confirmPortalLiquidation(studentId: string): Promise<PortalLiquidationStatus> {
+  return apiFetch<PortalLiquidationStatus>(`/portal/students/${studentId}/closure/liquidation/confirm`, { method: "POST" });
 }

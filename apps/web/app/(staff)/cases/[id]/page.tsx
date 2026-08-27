@@ -10,7 +10,6 @@ import {
   useCaseTimeline,
   useUpdateCaseStage,
   useUpdateCaseStatus,
-  useCloseCase,
   useAddCaseMember,
   useRemoveCaseMember,
   useReassignCaseOwner,
@@ -18,11 +17,10 @@ import {
 } from "@/lib/cases/hooks";
 import { CaseStageDialog } from "@/components/crm/cases/case-stage-dialog";
 import { CaseStatusDialog } from "@/components/crm/cases/case-status-dialog";
-import { CaseCloseDialog } from "@/components/crm/cases/case-close-dialog";
 import { CaseMemberDialog } from "@/components/crm/cases/case-member-dialog";
 import { AssignOwnerDialog } from "@/components/crm/assign-owner-dialog";
 import { ConfirmDialog } from "@/components/crm/confirm-dialog";
-import { StatusBadge, CASE_STATUS_VARIANT, CASE_STATUS_LABEL } from "@/components/crm/status-badge";
+import { StatusBadge, CASE_STATUS_VARIANT, CASE_STATUS_LABEL, CASE_STAGE_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
 import { TimelineView } from "@/components/crm/timeline-view";
 import { NoteForm } from "@/components/crm/note-form";
@@ -30,8 +28,6 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
-
-const CLOSABLE_STATUSES = new Set(["OPEN", "ACTIVE", "ON_HOLD", "COMPLETED"]);
 
 export function CaseDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
@@ -43,7 +39,6 @@ export function CaseDetailContent({ id }: { id: string }) {
 
   const updateStage = useUpdateCaseStage(id);
   const updateStatus = useUpdateCaseStatus(id);
-  const closeCase = useCloseCase(id);
   const addMember = useAddCaseMember(id);
   const removeMember = useRemoveCaseMember(id);
   const reassignOwner = useReassignCaseOwner(id);
@@ -51,7 +46,6 @@ export function CaseDetailContent({ id }: { id: string }) {
 
   const [stageOpen, setStageOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
-  const [closeOpen, setCloseOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [removeMemberTarget, setRemoveMemberTarget] = useState<{ userId: string; fullName: string } | null>(null);
@@ -59,7 +53,10 @@ export function CaseDetailContent({ id }: { id: string }) {
   if (isLoading) return <LoadingState />;
   if (error || !caseRecord) return <QueryErrorState error={error} onRetry={() => refetch()} />;
 
-  const canClose = CLOSABLE_STATUSES.has(caseRecord.status) && can("cases", "close");
+  // Client Acceptance Remediation DEC-06 (2026-08-26) — closure moved to the unified
+  // `/cases/:id/closure` workflow; visible to anyone who can view or act on it (HCTH,
+  // ED/DM's audited override, or the CONSULTANT case-owner's advisory request).
+  const canSeeClosure = can("case-closure", "view") || can("case-closure", "execute") || can("case-closure", "request");
 
   async function handleRemoveMember() {
     if (!removeMemberTarget) return;
@@ -101,10 +98,10 @@ export function CaseDetailContent({ id }: { id: string }) {
               Đổi chủ sở hữu
             </Button>
           ) : null}
-          {canClose ? (
-            <Button variant="danger" onClick={() => setCloseOpen(true)}>
-              Đóng case
-            </Button>
+          {canSeeClosure ? (
+            <Link href={`/cases/${id}/closure`}>
+              <Button variant="danger">Đóng hồ sơ</Button>
+            </Link>
           ) : null}
         </div>
       </div>
@@ -121,7 +118,7 @@ export function CaseDetailContent({ id }: { id: string }) {
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Giai đoạn</dt>
-              <dd>{caseRecord.stage}</dd>
+              <dd>{CASE_STAGE_LABEL[caseRecord.stage]}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Phòng ban</dt>
@@ -279,12 +276,6 @@ export function CaseDetailContent({ id }: { id: string }) {
         currentStatus={caseRecord.status}
         onSubmit={(status) => updateStatus.mutateAsync(status)}
         submitting={updateStatus.isPending}
-      />
-      <CaseCloseDialog
-        open={closeOpen}
-        onClose={() => setCloseOpen(false)}
-        onSubmit={(reason) => closeCase.mutateAsync(reason)}
-        submitting={closeCase.isPending}
       />
       <CaseMemberDialog
         open={memberOpen}

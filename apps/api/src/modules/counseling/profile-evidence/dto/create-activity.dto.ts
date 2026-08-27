@@ -40,6 +40,14 @@ export class CreateActivityDto {
   @MaxLength(1000)
   impact?: string;
 
+  /// Client Acceptance GAP-026 (2026-08-25) — sheet04 row13 "Awards" is only capturable via
+  /// Competition/ResearchProject's own `award` field; an award earned purely through an
+  /// extracurricular activity had no dedicated field, only free-text `impact`.
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  award?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(255)

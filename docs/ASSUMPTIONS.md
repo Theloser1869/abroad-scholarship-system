@@ -872,6 +872,18 @@ instruction text never states.
 `apps/api/src/modules/visa/visa-status/visa-status.service.ts`, `apps/api/src/modules/
 commercial/payments/payments.service.ts` (`hasOutstandingDebtForCase`).
 
+**Update (2026-08-26) — superseded by the unified Closure workflow, DEC-06/07/08 (GAP-007)**:
+`CasesService.close()` (the method this entry describes) has been deleted. Its four
+preconditions above, plus a new fifth (Document Handover — DEC-07, never conditionally
+applicable), now live in `ClosureService.buildStatus()`
+(`apps/api/src/modules/case-management/closure/closure.service.ts`), reached only via the
+unified `POST /cases/:id/closure/close` (HCTH standard, or ED/DM audited override) —
+`PATCH /cases/:id/close` no longer exists. The conditional-applicability reasoning for
+Enrollment/Pre-departure above is preserved unchanged (still "PASS if never applicable," not
+a third NOT_APPLICABLE state — only Visa in the new checklist reports NOT_APPLICABLE
+explicitly). See `docs/requirements/CLOSURE_LIQUIDATION_DESIGN.md` and `docs/DECISIONS.md`
+DEC-13 for the full replacement design.
+
 ## ASM-37 — Phase 09 RBAC grant matrix: master-data curation separated from case-scoped transaction permissions, mirroring Phase 08's ASM-31
 
 **Date**: 2026-08-19
@@ -2066,7 +2078,15 @@ final.
 `apps/api/src/modules/commercial/payments/payments.service.ts`,
 `apps/api/src/modules/reporting/reports/reports.service.ts`.
 
-## ASM-88 — Contract SIGNED→ACTIVE payment gate requires "at least one payment received," not full payment (Client Acceptance Remediation, GAP-002 / CONFLICT-001)
+## ASM-88 — Contract SIGNED→ACTIVE payment gate requires "at least one payment received," not full payment (Client Acceptance Remediation, GAP-002 / CONFLICT-001) — **SUPERSEDED 2026-08-27 by DEC-01 (client-confirmed 30% threshold)**
+
+**2026-08-27 update**: The client directly answered DEC-01
+(`docs/requirements/CLIENT_CLARIFICATION_SIGNOFF.md`): SIGNED→ACTIVE now requires **at
+least 30% of Contract.value received (net of refunds)** — a payment of any amount below
+30% is no longer sufficient, closing the open question this assumption originally
+registered. `CONFLICT-001` is now RESOLVED, not just an engineering placeholder. See
+`ContractsService.updateStatus` (`ACTIVATION_PAYMENT_THRESHOLD_RATIO`). The rest of this
+entry is left unchanged below as a historical record of the interim assumption.
 
 **Date**: 2026-08-24
 **Context**: `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md` REQ-CONTRACT-002 (CRITICAL,
@@ -2146,6 +2166,7 @@ profile filled in during counseling" flow. This is a stage-aware interpretation,
 literal implementation of "Bắt buộc" as a column constraint; if the client specifically
 wants these fields blocked at Student creation/edit instead, that is a straightforward
 follow-up change to `CreateStudentDto`/`UpdateStudentDto`.
+**Update (2026-08-25)**: The client directly confirmed the stage-aware interpretation above is the intended design — no longer an open assumption pending client input. The client separately resolved `Student.gpa`'s own requiredness (sheet04 "Bắt buộc" vs. sheet17 "Optional" — logged as CONFLICT-004): **GPA is Optional**. `assertStudentProfileComplete` was updated accordingly — the `AcademicRecord` check now only requires `grade`, not `gpa`. Everything else in this assumption (DOB/target*/scholarshipGoal, and `grade` itself) is unchanged and now client-confirmed rather than merely defensible. See `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md`'s "CLIENT DECISIONS APPLIED (2026-08-25)" section and `CLIENT_REQUIREMENTS_GAPS.md` GAP-027.
 **Affected modules**: `database/schema.prisma`,
 `apps/api/src/modules/counseling/assessments/assessments.service.ts`,
 `apps/api/src/modules/case-management/students/{dto/create-student.dto.ts,students.service.ts}`,
@@ -2186,3 +2207,26 @@ this residual gap. Do not report GAP-006 as fully closed without it.
 **Affected modules**: `database/schema.prisma`,
 `apps/api/src/modules/partners/commission-transactions/commission-transactions.service.ts`,
 `apps/api/src/modules/partners/partner-student-links/{dto/create-partner-student-link.dto.ts,partner-student-links.service.ts}`.
+
+## ASM-92 — "Writing hoàn thành" (Essay/Resume/SOP) is one merged KPI count, not three split by type (Client Acceptance Remediation, sheet06 rows 9-11, GAP-015)
+
+**Date**: 2026-08-26
+**Context**: `docs/requirements/CLIENT_ACCEPTANCE_MATRIX.md` REQ-KPI-005 (sheet06 "Task_KPI" rows
+9-11) lists three separate KPI rows: "Essay hoàn thành," "Resume hoàn thành," "SOP/Motivation
+Letter." `WritingArtifact.type` is a free-text field (`writing-artifact-form-dialog.tsx`'s
+`<Input placeholder="Essay, SOP, Resume...">`, no dropdown/enum), so existing production rows
+carry arbitrary values ("Personal Essay," "Common App Essay," "Statement of Purpose," etc.) with
+no canonical mapping to "Essay" vs. "SOP." A substring/heuristic classifier would silently
+misclassify or drop rows — an invented business rule, not a defensible reading of existing data.
+**Decision**: Client was asked directly and chose to merge all three into one "Writing hoàn
+thành" count (`executiveDashboard.kpi.writingCompleted`) — every `WritingArtifact` with
+`status IN (FINAL, SUBMITTED)` counts as complete, regardless of `type`. No per-type breakdown
+is computed or displayed.
+**Reason**: The alternative (best-effort string matching) would have produced a number that
+looked authoritative but was actually an unverifiable guess — worse than not having the
+breakdown at all for a KPI a director might act on.
+**Scope note — if the client later wants the Essay/Resume/SOP split back**: `WritingArtifact.type`
+needs a controlled vocabulary (dropdown, migrating existing free-text values) first — the split
+cannot be retroactively and reliably derived from the data as it exists today.
+**Affected modules**: `apps/api/src/modules/reporting/reports/reports.service.ts`,
+`apps/web/lib/reports/types.ts`, `apps/web/app/(staff)/dashboard/page.tsx`.

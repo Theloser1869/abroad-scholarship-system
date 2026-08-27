@@ -8,7 +8,6 @@ import { CommentsService } from '../../notifications/comments/comments.service';
 import { TimelineService } from '../../reporting/timeline/timeline.service';
 import { AddCaseMemberDto } from './dto/add-case-member.dto';
 import { CaseQueryDto } from './dto/case-query.dto';
-import { CloseCaseDto } from './dto/close-case.dto';
 import { ReassignCaseOwnerDto } from './dto/reassign-case-owner.dto';
 import { UpdateCaseStageDto } from './dto/update-case-stage.dto';
 import { UpdateCaseStatusDto } from './dto/update-case-status.dto';
@@ -47,13 +46,6 @@ export class CasesController {
   @Audit('EDIT')
   async updateStatus(@CurrentUser() principal: Principal | null, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCaseStatusDto) {
     return this.cases.updateStatus(requirePrincipal(principal), id, dto.status);
-  }
-
-  @Patch(':id/close')
-  @RequirePermission('cases', 'close')
-  @Audit('ARCHIVE')
-  async close(@CurrentUser() principal: Principal | null, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CloseCaseDto) {
-    return this.cases.close(requirePrincipal(principal), id, dto);
   }
 
   @Get(':id/members')

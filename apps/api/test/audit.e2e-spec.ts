@@ -90,8 +90,11 @@ describe('Audit (e2e)', () => {
   });
 
   it('audits a DENIED attempt (permission check failure), not just successful ones', async () => {
-    const { token: salesToken } = await issueTestSession(prisma, 'demo.sales');
-    const res = await request(app.getHttpServer()).get('/students').set('Authorization', `Bearer ${salesToken}`);
+    // `demo.sales`/`demo.finance` now hold `students:view` (client permission-matrix
+    // remediation, 2026-08-25) — `admin` (SYSTEM_ADMIN) is the role with genuinely zero
+    // `students` grant, matching rbac.e2e-spec.ts's own "NONE scope" coverage.
+    const { token: adminToken } = await issueTestSession(prisma, 'admin');
+    const res = await request(app.getHttpServer()).get('/students').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(403);
     // The `students` list endpoint itself is not @Audit-decorated (only single-record and
     // mutating routes are — see docs/api/API_CONVENTIONS.md section 7), so exercise a
