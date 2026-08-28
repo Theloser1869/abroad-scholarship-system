@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: abroad_app_dev_password
       POSTGRES_DB: abroad_scholarship_dev
     ports:
-      - "55432:5432"
+      - "55532:5432"
     volumes:
       - abroad_scholarship_pgdata:/var/lib/postgresql/data
     healthcheck:

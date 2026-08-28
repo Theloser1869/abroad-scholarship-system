@@ -13,7 +13,7 @@ const CODE_MESSAGES: Record<string, string> = {
   CASE_NOT_FOUND: "Không tìm thấy case.",
   STUDENT_NOT_FOUND: "Không tìm thấy học sinh.",
   DUPLICATE_ACTIVE_CASE: "Học sinh này đã có case đang hoạt động.",
-  STUDENT_PROFILE_INCOMPLETE: "Hồ sơ học sinh còn thiếu thông tin bắt buộc (ngày sinh, quốc gia/ngành/đợt mục tiêu, mục tiêu học bổng, hoặc lớp) — cần bổ sung trước khi duyệt đánh giá.",
+  STUDENT_PROFILE_INCOMPLETE: "Hồ sơ học sinh còn thiếu thông tin bắt buộc (ngày sinh, quốc gia/ngành/đợt mục tiêu, mục tiêu học bổng, và lớp) — cần bổ sung đầy đủ tất cả trước khi duyệt đánh giá.",
   INVALID_STATUS_TRANSITION: "Không thể chuyển sang trạng thái này từ trạng thái hiện tại.",
   OPEN_TASKS_REMAIN: "Còn task chưa hoàn thành — không thể đóng case.",
   OUTSTANDING_DEBT_REMAINS: "Còn công nợ chưa thanh toán — cần xử lý trước khi tiếp tục.",

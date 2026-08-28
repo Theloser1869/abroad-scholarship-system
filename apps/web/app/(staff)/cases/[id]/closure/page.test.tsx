@@ -151,4 +151,15 @@ describe("CaseClosurePage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Xác nhận thanh lý (phía công ty)" }));
     await waitFor(() => expect(closureApi.confirmLiquidationCompany).toHaveBeenCalledWith("case-1", undefined));
   });
+
+  it("shows 'Hồ sơ đã đóng.' once CLOSED, never the not-ready message (readyToClose is false post-close by design)", async () => {
+    authState.principal = { userId: "hcth-1", roleCode: "ADMIN_FINANCE" };
+    closureApi.getClosureStatus.mockResolvedValue(makeStatus({ caseStatus: "CLOSED" }));
+
+    renderClosure();
+    await screen.findByText(/CASE-2026-00001/);
+
+    expect(screen.getByText("Hồ sơ đã đóng.")).toBeInTheDocument();
+    expect(screen.queryByText("Chưa đủ điều kiện — cần xử lý các mục Chưa đạt ở trên.")).not.toBeInTheDocument();
+  });
 });

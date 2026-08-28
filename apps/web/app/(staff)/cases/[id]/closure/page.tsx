@@ -134,8 +134,12 @@ export function CaseClosureContent({ caseId }: { caseId: string }) {
             </li>
           ))}
         </ul>
-        <p className={`mt-3 text-sm ${status.readyToClose ? "text-success" : "text-muted-foreground"}`}>
-          {status.readyToClose ? "Đủ điều kiện để đóng hồ sơ." : "Chưa đủ điều kiện — cần xử lý các mục Chưa đạt ở trên."}
+        <p className={`mt-3 text-sm ${status.readyToClose || isClosed ? "text-success" : "text-muted-foreground"}`}>
+          {isClosed
+            ? "Hồ sơ đã đóng."
+            : status.readyToClose
+              ? "Đủ điều kiện để đóng hồ sơ."
+              : "Chưa đủ điều kiện — cần xử lý các mục Chưa đạt ở trên."}
         </p>
       </Card>
 
