@@ -12,6 +12,7 @@ import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/quer
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 /// Version list (F04 instruction §16/§17: approved versions are immutable, a new version is
 /// always the next one). `createAssessment` collects an optional `changeReason` inline
@@ -22,6 +23,7 @@ function CaseAssessmentsContent({ caseId }: { caseId: string }) {
   const { toast } = useToast();
   const router = useRouter();
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const { data: assessments, isLoading, error, refetch } = useAssessmentsForCase(caseId);
   const createAssessment = useCreateAssessment(caseId);
 

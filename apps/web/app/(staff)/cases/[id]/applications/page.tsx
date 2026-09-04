@@ -10,6 +10,7 @@ import type { ApplicationListParams, ApplicationStatus } from "@/lib/application
 import { ApplicationFormDialog } from "@/components/crm/applications/application-form-dialog";
 import { StatusBadge, APPLICATION_STATUS_VARIANT, APPLICATION_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 import { PaginationControls } from "@/components/crm/pagination-controls";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ const STATUS_FILTERS: ApplicationStatus[] = ["PLANNING", "PREPARING", "READY_FOR
 export function CaseApplicationsContent({ caseId }: { caseId: string }) {
   const { can } = usePermissions();
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const [status, setStatus] = useState<ApplicationStatus | "">("");
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);

@@ -10,6 +10,7 @@ import { useAssessmentsForCase } from "@/lib/assessments/hooks";
 import { useCreateRoadmap, useRoadmapsForCase } from "@/lib/roadmaps/hooks";
 import { StatusBadge, ROADMAP_STATUS_VARIANT, ROADMAP_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
@@ -20,6 +21,7 @@ function CaseRoadmapsContent({ caseId }: { caseId: string }) {
   const { toast } = useToast();
   const router = useRouter();
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const { data: roadmaps, isLoading, error, refetch } = useRoadmapsForCase(caseId);
   const { data: assessments } = useAssessmentsForCase(caseId);
   const createRoadmap = useCreateRoadmap(caseId);

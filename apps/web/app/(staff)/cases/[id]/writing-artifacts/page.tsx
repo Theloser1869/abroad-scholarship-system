@@ -18,6 +18,7 @@ import {
   LOR_SUBMISSION_STATUS_VARIANT,
 } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -33,6 +34,7 @@ const SUBMISSION_LABEL: Record<string, string> = { PENDING: "Chưa nộp", SUBMI
 export function CaseWritingArtifactsContent({ caseId }: { caseId: string }) {
   const { can } = usePermissions();
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const { data: artifacts, isLoading, error, refetch } = useWritingArtifactsForCase(caseId);
   const createArtifact = useCreateWritingArtifact(caseId);
   const [createOpen, setCreateOpen] = useState(false);

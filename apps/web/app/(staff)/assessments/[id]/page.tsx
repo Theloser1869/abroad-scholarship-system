@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } fro
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 const EDITABLE_STATUSES = new Set(["DRAFT", "REVIEW"]);
 
@@ -22,6 +23,7 @@ export function AssessmentDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
   const { toast } = useToast();
   const { data: assessment, isLoading, error, refetch } = useAssessment(id);
+  useBreadcrumbLabel(id, assessment ? `Phiên bản ${assessment.version}` : undefined);
   const submitAssessment = useSubmitAssessment(id, assessment?.caseId ?? "");
   const approveAssessment = useApproveAssessment(id, assessment?.caseId ?? "");
   const rejectAssessment = useRejectAssessment(id, assessment?.caseId ?? "");

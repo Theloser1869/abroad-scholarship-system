@@ -9,6 +9,7 @@ import { usePreDepartureItems, useCreatePreDepartureItem } from "@/lib/pre-depar
 import { PreDepartureItemDialog } from "@/components/crm/pre-departure/pre-departure-item-dialog";
 import { PreDepartureItemRow } from "@/components/crm/pre-departure/pre-departure-item-row";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 import { Button } from "@/components/ui/button";
 
 /// Pre-departure workspace (F06 instruction §12/§13) — the identical `VisaChecklistItem`
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 export function CasePreDepartureContent({ caseId }: { caseId: string }) {
   const { can } = usePermissions();
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const { data: items, isLoading, error, refetch } = usePreDepartureItems(caseId);
   const createItem = useCreatePreDepartureItem(caseId);
   const [createOpen, setCreateOpen] = useState(false);

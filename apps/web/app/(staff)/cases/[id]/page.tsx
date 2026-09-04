@@ -28,12 +28,14 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 export function CaseDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
   const { toast } = useToast();
 
   const { data: caseRecord, isLoading, error, refetch } = useCase(id);
+  useBreadcrumbLabel(id, caseRecord?.caseCode);
   const { data: members, isLoading: membersLoading, error: membersError } = useCaseMembers(id);
   const { data: timeline, isLoading: timelineLoading, error: timelineError, refetch: refetchTimeline } = useCaseTimeline(id);
 

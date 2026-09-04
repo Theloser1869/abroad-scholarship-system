@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 /// Client Acceptance Remediation DEC-06/07/08 (GAP-007, REQ-CASE-014, 2026-08-26) — the
 /// unified Closure/Liquidation workflow. Replaces the old `CaseCloseDialog` (which never
@@ -34,6 +35,7 @@ export function CaseClosureContent({ caseId }: { caseId: string }) {
   const { can, roleCode } = usePermissions();
   const { toast } = useToast();
   const { data: status, isLoading: statusLoading, error: statusError, refetch: refetchStatus } = useClosureStatus(caseId);
+  useBreadcrumbLabel(caseId, status?.caseCode);
 
   const requestClosure = useRequestClosure(caseId);
   const confirmHandover = useConfirmHandover(caseId);

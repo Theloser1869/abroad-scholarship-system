@@ -9,6 +9,7 @@ import { useEnrollmentsForCase, useCreateEnrollment } from "@/lib/enrollments/ho
 import { EnrollmentFormDialog } from "@/components/crm/enrollments/enrollment-form-dialog";
 import { StatusBadge, ENROLLMENT_STATUS_VARIANT, ENROLLMENT_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import type { CreateEnrollmentInput } from "@/lib/enrollments/types";
@@ -19,6 +20,7 @@ import type { CreateEnrollmentInput } from "@/lib/enrollments/types";
 export function CaseEnrollmentsContent({ caseId }: { caseId: string }) {
   const { can } = usePermissions();
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const { data: enrollments, isLoading, error, refetch } = useEnrollmentsForCase(caseId);
   const createEnrollment = useCreateEnrollment(caseId);
   const [createOpen, setCreateOpen] = useState(false);

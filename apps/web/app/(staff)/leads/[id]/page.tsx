@@ -14,12 +14,14 @@ import { TimelineView } from "@/components/crm/timeline-view";
 import { NoteForm } from "@/components/crm/note-form";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 const TERMINAL_STATUSES = new Set(["CONVERTED", "LOST"]);
 
 export function LeadDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
   const { data: lead, isLoading, error, refetch } = useLead(id);
+  useBreadcrumbLabel(id, lead?.leadCode);
   const { data: timeline, isLoading: timelineLoading, error: timelineError, refetch: refetchTimeline } = useLeadTimeline(id);
 
   const updateLead = useUpdateLead(id);

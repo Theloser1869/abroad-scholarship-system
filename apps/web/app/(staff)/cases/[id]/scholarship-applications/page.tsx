@@ -10,6 +10,7 @@ import { useScholarshipApplicationsForCase, useCreateScholarshipApplication } fr
 import { ScholarshipApplicationFormDialog } from "@/components/crm/scholarship-applications/scholarship-application-form-dialog";
 import { StatusBadge, SCHOLARSHIP_APPLICATION_STATUS_VARIANT, SCHOLARSHIP_APPLICATION_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Money } from "@/components/crm/money";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import { Button } from "@/components/ui/button";
 export function CaseScholarshipApplicationsContent({ caseId }: { caseId: string }) {
   const { can } = usePermissions();
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const { data: applications } = useApplicationsForCase(caseId, { limit: 100 });
   const { data: scholarshipApplications, isLoading, error, refetch } = useScholarshipApplicationsForCase(caseId);
   const createScholarshipApplication = useCreateScholarshipApplication(caseId);

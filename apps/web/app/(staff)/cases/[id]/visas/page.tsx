@@ -10,6 +10,7 @@ import type { VisaListParams, VisaStatus } from "@/lib/visas/types";
 import { VisaFormDialog } from "@/components/crm/visas/visa-form-dialog";
 import { StatusBadge, VISA_STATUS_VARIANT, VISA_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 import { PaginationControls } from "@/components/crm/pagination-controls";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ const STATUS_FILTERS: VisaStatus[] = ["NOT_STARTED", "PREPARING", "READY", "SUBM
 export function CaseVisasContent({ caseId }: { caseId: string }) {
   const { can } = usePermissions();
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const [status, setStatus] = useState<VisaStatus | "">("");
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);

@@ -28,7 +28,7 @@ const CODE_MESSAGES: Record<string, string> = {
   ALREADY_LIQUIDATED: "Hồ sơ đã được thanh lý — không thể xác nhận lại (bất biến).",
   USE_UNIFIED_CLOSURE_WORKFLOW: "Hợp đồng này đã liên kết với một case — vui lòng thực hiện Hoàn tất/Thanh lý qua luồng Đóng hồ sơ hợp nhất của case, không qua hợp đồng trực tiếp.",
   CASE_MEMBER_NOT_FOUND: "Người dùng này không phải thành viên đang hoạt động của case.",
-  PERMISSION_DENIED: "Chỉ chủ sở hữu case (hoặc vai trò GLOBAL) mới có quyền thao tác này.",
+  PERMISSION_DENIED: "Bạn không có quyền thực hiện thao tác này. Vui lòng liên hệ quản trị viên nếu cần hỗ trợ.",
   VALIDATION_ERROR: "Dữ liệu nhập không hợp lệ.",
 
   // F04 — Contract (apps/api/src/modules/commercial/contracts)

@@ -6,6 +6,8 @@ import { createSchoolMaster, listSchoolMasters } from "@/lib/school-masters/api"
 import { useDebouncedValue } from "@/lib/utils/use-debounced-value";
 import { usePermissions } from "@/lib/permissions/use-permissions";
 import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/toast";
+import { crmErrorMessage } from "@/lib/api/error-messages";
 
 /// Client Acceptance Remediation DEC-05(b) (2026-08-27) — "ưu tiên School Master, cho phép
 /// nhập trường chưa có." Modeled directly on `ProgramPicker`
@@ -29,6 +31,7 @@ export function SchoolPicker({
   const [creating, setCreating] = useState(false);
   const debouncedSchool = useDebouncedValue(school, 300);
   const { can } = usePermissions();
+  const { toast } = useToast();
 
   const { data, isLoading } = useQuery({
     queryKey: ["school-masters", "picker", debouncedSchool],
@@ -44,6 +47,8 @@ export function SchoolPicker({
       const created = await createSchoolMaster({ name: school.trim() });
       onChange(created.name, created.id);
       setOpen(false);
+    } catch (err) {
+      toast({ title: "Không thêm được trường mới", description: crmErrorMessage(err), variant: "danger" });
     } finally {
       setCreating(false);
     }

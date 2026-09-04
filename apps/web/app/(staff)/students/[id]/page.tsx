@@ -30,12 +30,14 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { usePartnerStudentLinksForStudent } from "@/lib/partner-student-links/hooks";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 export function StudentDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
   const { toast } = useToast();
   const router = useRouter();
   const { data: student, isLoading, error, refetch } = useStudent(id);
+  useBreadcrumbLabel(id, student?.fullName);
   const { data: timeline, isLoading: timelineLoading, error: timelineError, refetch: refetchTimeline } = useStudentTimeline(id);
   const { data: contacts, isLoading: contactsLoading, error: contactsError } = useStudentContacts(id);
   const { data: cases, isLoading: casesLoading, error: casesError } = useCasesForStudent(id);

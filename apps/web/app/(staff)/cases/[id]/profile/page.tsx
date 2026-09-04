@@ -33,6 +33,7 @@ import { ResearchProjectDialog } from "@/components/crm/profile-evidence/researc
 import { ActivityDialog } from "@/components/crm/profile-evidence/activity-dialog";
 import { EvidenceDocumentLink } from "@/components/crm/evidence-document-link";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 import { Button } from "@/components/ui/button";
 
 type Tab = "academic" | "test" | "competition" | "research" | "activity";
@@ -46,6 +47,7 @@ const TABS: { key: Tab; label: string }[] = [
 
 export function CaseProfileContent({ caseId }: { caseId: string }) {
   const { data: caseRecord } = useCase(caseId);
+  useBreadcrumbLabel(caseId, caseRecord?.caseCode);
   const [tab, setTab] = useState<Tab>("academic");
 
   return (

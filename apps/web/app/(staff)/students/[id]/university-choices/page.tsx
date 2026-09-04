@@ -25,6 +25,7 @@ import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/quer
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 const STATUSES: UniversityChoiceStatus[] = ["PROPOSED", "SHORTLISTED", "CONFIRMED", "REMOVED"];
 
@@ -119,6 +120,7 @@ function UniversityChoiceRow({ choice, canEdit }: { choice: UniversityChoice; ca
 export function StudentUniversityChoicesContent({ studentId }: { studentId: string }) {
   const { can } = usePermissions();
   const { data: student } = useStudent(studentId);
+  useBreadcrumbLabel(studentId, student?.fullName);
   const { data: choices, isLoading, error, refetch } = useUniversityChoicesForStudent(studentId);
   const createChoice = useCreateUniversityChoice(studentId);
   const [createOpen, setCreateOpen] = useState(false);
