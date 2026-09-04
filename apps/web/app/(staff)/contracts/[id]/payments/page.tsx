@@ -15,6 +15,7 @@ import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/quer
 import { PaginationControls } from "@/components/crm/pagination-controls";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 const ALL_STATUSES: PaymentStatus[] = ["PENDING", "PARTIALLY_PAID", "PAID", "OVERDUE", "REFUNDED", "WAIVED"];
 
@@ -24,6 +25,7 @@ const ALL_STATUSES: PaymentStatus[] = ["PENDING", "PARTIALLY_PAID", "PAID", "OVE
 export function ContractPaymentsContent({ contractId }: { contractId: string }) {
   const { can } = usePermissions();
   const { data: contract } = useContract(contractId);
+  useBreadcrumbLabel(contractId, contract?.contractCode);
   const [status, setStatus] = useState<PaymentStatus | "">("");
   const [overdue, setOverdue] = useState(false);
   const [page, setPage] = useState(1);

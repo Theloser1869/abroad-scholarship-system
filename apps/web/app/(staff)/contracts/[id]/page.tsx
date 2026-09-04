@@ -28,6 +28,7 @@ import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/quer
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { UpdateContractInput } from "@/lib/contracts/types";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 const POST_SIGN_STATUSES = new Set(["SIGNED", "ACTIVE", "COMPLETED", "LIQUIDATED"]);
 
@@ -35,6 +36,7 @@ export function ContractDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
 
   const { data: contract, isLoading, error, refetch } = useContract(id);
+  useBreadcrumbLabel(id, contract?.contractCode);
   const { data: amendments, isLoading: amendmentsLoading, error: amendmentsError } = useContractAmendments(id);
 
   const updateContract = useUpdateContract(id);

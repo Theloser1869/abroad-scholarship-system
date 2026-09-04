@@ -13,10 +13,12 @@ import { LoadingState, QueryErrorState } from "@/components/crm/query-states";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { OfferDecision } from "@/lib/offers/types";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 export function OfferDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
   const { data: offer, isLoading, error, refetch } = useOffer(id);
+  useBreadcrumbLabel(id, offer?.offerType);
   const respondToOffer = useRespondToOffer(id, offer?.applicationId ?? "");
   const [respondDecision, setRespondDecision] = useState<OfferDecision | null>(null);
 

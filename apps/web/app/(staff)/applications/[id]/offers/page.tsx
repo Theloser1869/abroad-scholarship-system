@@ -11,6 +11,7 @@ import { Money } from "@/components/crm/money";
 import { StatusBadge, OFFER_STATUS_VARIANT, OFFER_STATUS_LABEL } from "@/components/crm/status-badge";
 import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/query-states";
 import { Button } from "@/components/ui/button";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 /// Offer history for one Application (F05 instruction §18/§20) — full history always kept,
 /// never overwritten; the current offer (backend-computed, never derived from "latest
@@ -18,6 +19,7 @@ import { Button } from "@/components/ui/button";
 export function ApplicationOffersContent({ applicationId }: { applicationId: string }) {
   const { can } = usePermissions();
   const { data: application } = useApplication(applicationId);
+  useBreadcrumbLabel(applicationId, application?.applicationCode);
   const { data: offers, isLoading, error, refetch } = useOffersForApplication(applicationId);
   const { data: currentOffer } = useCurrentOffer(applicationId);
   const createOffer = useCreateOffer(applicationId);

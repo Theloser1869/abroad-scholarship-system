@@ -12,6 +12,7 @@ import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/quer
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { Payment } from "@/lib/payments/types";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 const UNRESOLVED_STATUSES = new Set(["PENDING", "PARTIALLY_PAID", "OVERDUE"]);
 
@@ -25,6 +26,7 @@ const UNRESOLVED_STATUSES = new Set(["PENDING", "PARTIALLY_PAID", "OVERDUE"]);
 function ContractClosureContent({ contractId }: { contractId: string }) {
   const { can } = usePermissions();
   const { data: contract, isLoading, error, refetch } = useContract(contractId);
+  useBreadcrumbLabel(contractId, contract?.contractCode);
   const { data: payments, isLoading: paymentsLoading } = usePaymentsForContract(contractId, { limit: 100 });
 
   if (isLoading) return <LoadingState />;

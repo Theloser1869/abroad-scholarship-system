@@ -26,6 +26,7 @@ import { LoadingState, EmptyState, QueryErrorState } from "@/components/crm/quer
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { UpdateApplicationInput } from "@/lib/applications/types";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 /// Application workspace (F05 instruction §14/§32): Header → Institution/Program → Status →
 /// Checklist → Documents → Offers → Scholarship → Actions. Never infers the next FSM state
@@ -34,6 +35,7 @@ import type { UpdateApplicationInput } from "@/lib/applications/types";
 export function ApplicationDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
   const { data: application, isLoading, error, refetch } = useApplication(id);
+  useBreadcrumbLabel(id, application?.applicationCode);
   const { data: currentOffer } = useCurrentOffer(can("offers", "view") ? id : undefined);
 
   const updateApplication = useUpdateApplication(id);

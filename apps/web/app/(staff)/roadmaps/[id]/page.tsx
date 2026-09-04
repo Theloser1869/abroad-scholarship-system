@@ -35,6 +35,7 @@ import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import { MANUAL_ROADMAP_STATUSES } from "@/lib/roadmaps/types";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 const POST_APPROVAL_STATUSES = new Set(["APPROVED", "ACTIVE", "COMPLETED"]);
 
@@ -43,6 +44,7 @@ export function RoadmapDetailContent({ id }: { id: string }) {
   const { toast } = useToast();
   const { data: roadmap, isLoading, error, refetch } = useRoadmap(id);
   const caseId = roadmap?.caseId ?? "";
+  useBreadcrumbLabel(id, roadmap ? `Phiên bản ${roadmap.version}` : undefined);
 
   const submitRoadmap = useSubmitRoadmap(id, caseId);
   const approveRoadmap = useApproveRoadmap(id, caseId);

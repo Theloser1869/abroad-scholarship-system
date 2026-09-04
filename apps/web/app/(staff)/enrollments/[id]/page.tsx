@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import type { UpdateEnrollmentInput } from "@/lib/enrollments/types";
+import { useBreadcrumbLabel } from "@/components/shell/breadcrumb-labels";
 
 /// Enrollment detail (F06 instruction §14/§15): only two dedicated FSM actions exist —
 /// `confirm` (PLANNED → CONFIRMED) and `withdraw` ({PLANNED, CONFIRMED} → WITHDRAWN) — no
@@ -24,6 +25,7 @@ import type { UpdateEnrollmentInput } from "@/lib/enrollments/types";
 export function EnrollmentDetailContent({ id }: { id: string }) {
   const { can } = usePermissions();
   const { data: enrollment, isLoading, error, refetch } = useEnrollment(id);
+  useBreadcrumbLabel(id, enrollment?.university.officialName);
   const updateEnrollment = useUpdateEnrollment(id, enrollment?.caseId ?? "");
   const confirmEnrollment = useConfirmEnrollment(id, enrollment?.caseId ?? "");
   const withdrawEnrollment = useWithdrawEnrollment(id, enrollment?.caseId ?? "");
