@@ -190,7 +190,25 @@ export function CaseClosureContent({ caseId }: { caseId: string }) {
                   </label>
                   <Textarea id="handover-notes" value={handoverNotes} onChange={(e) => setHandoverNotes(e.target.value)} rows={2} />
                 </div>
-                <Button variant="secondary" onClick={handleHandover} disabled={confirmHandover.isPending}>
+                {isOverrideActor ? (
+                  <div>
+                    <label htmlFor="handover-override-reason" className="mb-1 block text-sm font-medium">
+                      Lý do xử lý ngoại lệ (Trưởng phòng/GĐĐH thay HCTH) *
+                    </label>
+                    <Textarea
+                      id="handover-override-reason"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      rows={2}
+                      minLength={3}
+                    />
+                  </div>
+                ) : null}
+                <Button
+                  variant="secondary"
+                  onClick={handleHandover}
+                  disabled={confirmHandover.isPending || (isOverrideActor && overrideReason.trim().length < 3)}
+                >
                   {confirmHandover.isPending ? "Đang xác nhận..." : "Xác nhận bàn giao"}
                 </Button>
               </>
