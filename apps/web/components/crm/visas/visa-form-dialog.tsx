@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { Textarea } from "@/components/ui/textarea";
 import { DuplicateConflictNotice } from "@/components/crm/duplicate-conflict-notice";
+import { CountryPicker } from "@/components/crm/countries/country-picker";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import type { CreateVisaInput, UpdateVisaInput, Visa } from "@/lib/visas/types";
 
@@ -75,12 +76,7 @@ export function VisaFormDialog({
     <Dialog open={open} onClose={onClose} title={isEdit ? "Sửa hồ sơ visa" : "Tạo hồ sơ visa mới"}>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="visa-country" className="mb-1 block text-sm font-medium">
-              Mã quốc gia (ISO-2) *
-            </label>
-            <Input id="visa-country" value={countryCode} onChange={(e) => setCountryCode(e.target.value.toUpperCase())} maxLength={2} required />
-          </div>
+          <CountryPicker label="Quốc gia *" value={countryCode} onChange={setCountryCode} required />
           <div>
             <label htmlFor="visa-type" className="mb-1 block text-sm font-medium">
               Loại visa *

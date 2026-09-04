@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { CountryPicker } from "@/components/crm/countries/country-picker";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
@@ -110,12 +111,11 @@ export function LeadFormDialog({
           <Input id="email" type="email" value={form.email ?? ""} onChange={(e) => set("email", e.target.value)} />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="countryInterest" className="mb-1 block text-sm font-medium">
-              Quốc gia quan tâm
-            </label>
-            <Input id="countryInterest" value={form.countryInterest ?? ""} onChange={(e) => set("countryInterest", e.target.value)} />
-          </div>
+          <CountryPicker
+            label="Quốc gia quan tâm"
+            value={form.countryInterest ?? ""}
+            onChange={(code) => set("countryInterest", code)}
+          />
           <div>
             <label htmlFor="majorInterest" className="mb-1 block text-sm font-medium">
               Ngành quan tâm

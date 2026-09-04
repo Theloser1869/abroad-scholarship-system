@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { CountryPicker } from "@/components/crm/countries/country-picker";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
@@ -105,12 +106,7 @@ export function StudentFormDialog({
           <Input id="email" type="email" value={form.email ?? ""} onChange={(e) => set("email", e.target.value)} />
         </div>
         <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label htmlFor="targetCountry" className="mb-1 block text-sm font-medium">
-              Quốc gia
-            </label>
-            <Input id="targetCountry" value={form.targetCountry ?? ""} onChange={(e) => set("targetCountry", e.target.value)} />
-          </div>
+          <CountryPicker label="Quốc gia" value={form.targetCountry ?? ""} onChange={(code) => set("targetCountry", code)} />
           <div>
             <label htmlFor="targetMajor" className="mb-1 block text-sm font-medium">
               Ngành
