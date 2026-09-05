@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { COUNTRIES, findCountryByCode } from "@/lib/countries/data";
 
@@ -24,9 +24,17 @@ export function CountryPicker({
   const [query, setQuery] = useState(() => findCountryByCode(value)?.nameVi ?? value ?? "");
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
+  // Re-sync the display text with `value` whenever it (or `open`, on close) changes —
+  // adjusted during render rather than in an effect (react-hooks/set-state-in-effect;
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
+  // so this never costs an extra commit/paint before catching up.
+  const [prevValue, setPrevValue] = useState(value);
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (value !== prevValue || open !== prevOpen) {
+    setPrevValue(value);
+    setPrevOpen(open);
     if (!open) setQuery(findCountryByCode(value)?.nameVi ?? value ?? "");
-  }, [value, open]);
+  }
 
   const q = query.trim().toLowerCase();
   const results = q
