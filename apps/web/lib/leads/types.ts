@@ -18,6 +18,7 @@ export interface Lead {
   parentName: string | null;
   email: string | null;
   phone: string | null;
+  parentPhone: string | null;
   source: string | null;
   campaign: string | null;
   countryInterest: string | null;
@@ -48,6 +49,7 @@ export interface CreateLeadInput {
   parentName?: string;
   email?: string;
   phone?: string;
+  parentPhone?: string;
   source?: string;
   campaign?: string;
   countryInterest?: string;

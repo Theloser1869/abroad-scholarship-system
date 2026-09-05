@@ -22,8 +22,11 @@ export class CreateStudentContactDto {
   @MaxLength(100)
   relationship?: string;
 
+  /// 'VN' as the default region so staff can type the normal local format
+  /// (0901234567) — not just E.164 (+84901234567), which `@IsPhoneNumber()` with no
+  /// region would otherwise require.
   @IsOptional()
-  @IsPhoneNumber()
+  @IsPhoneNumber('VN')
   phone?: string;
 
   @IsOptional()

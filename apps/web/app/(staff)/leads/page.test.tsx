@@ -27,6 +27,7 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
     parentName: null,
     email: "a@example.com",
     phone: null,
+    parentPhone: null,
     source: null,
     campaign: null,
     countryInterest: null,

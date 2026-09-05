@@ -79,11 +79,15 @@ export function LeadDetailContent({ id }: { id: string }) {
               <dd>{lead.parentName ?? "—"}</dd>
             </div>
             <div className="flex justify-between">
+              <dt className="text-muted-foreground">SĐT phụ huynh</dt>
+              <dd>{lead.parentPhone ?? "—"}</dd>
+            </div>
+            <div className="flex justify-between">
               <dt className="text-muted-foreground">Email</dt>
               <dd>{lead.email ?? "—"}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-muted-foreground">Điện thoại</dt>
+              <dt className="text-muted-foreground">SĐT học sinh</dt>
               <dd>{lead.phone ?? "—"}</dd>
             </div>
             <div className="flex justify-between">

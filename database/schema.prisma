@@ -486,7 +486,10 @@ model Lead {
   contactName        String     @map("contact_name")
   parentName         String?    @map("parent_name")
   email              String?
+  /// The student's own phone — kept separate from `parentPhone` since the two are commonly
+  /// different numbers and a Lead form has no student-vs-parent ambiguity to resolve later.
   phone              String?
+  parentPhone        String?    @map("parent_phone")
   source             String?
   campaign           String?
   countryInterest    String?    @map("country_interest")

@@ -15,6 +15,7 @@ const EMPTY: CreateLeadInput = {
   parentName: "",
   email: "",
   phone: "",
+  parentPhone: "",
   source: "",
   campaign: "",
   countryInterest: "",
@@ -53,6 +54,7 @@ export function LeadFormDialog({
             parentName: lead.parentName ?? "",
             email: lead.email ?? "",
             phone: lead.phone ?? "",
+            parentPhone: lead.parentPhone ?? "",
             source: lead.source ?? "",
             campaign: lead.campaign ?? "",
             countryInterest: lead.countryInterest ?? "",
@@ -98,17 +100,25 @@ export function LeadFormDialog({
             <Input id="parentName" value={form.parentName ?? ""} onChange={(e) => set("parentName", e.target.value)} />
           </div>
           <div>
+            <label htmlFor="parentPhone" className="mb-1 block text-sm font-medium">
+              SĐT phụ huynh
+            </label>
+            <Input id="parentPhone" value={form.parentPhone ?? ""} onChange={(e) => set("parentPhone", e.target.value)} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
             <label htmlFor="phone" className="mb-1 block text-sm font-medium">
-              Điện thoại
+              SĐT học sinh
             </label>
             <Input id="phone" value={form.phone ?? ""} onChange={(e) => set("phone", e.target.value)} />
           </div>
-        </div>
-        <div>
-          <label htmlFor="email" className="mb-1 block text-sm font-medium">
-            Email
-          </label>
-          <Input id="email" type="email" value={form.email ?? ""} onChange={(e) => set("email", e.target.value)} />
+          <div>
+            <label htmlFor="email" className="mb-1 block text-sm font-medium">
+              Email
+            </label>
+            <Input id="email" type="email" value={form.email ?? ""} onChange={(e) => set("email", e.target.value)} />
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <CountryPicker
