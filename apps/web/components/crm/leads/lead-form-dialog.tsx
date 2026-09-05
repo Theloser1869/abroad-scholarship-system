@@ -75,7 +75,19 @@ export function LeadFormDialog({
     if (!form.contactName.trim()) return;
     setError(null);
     try {
-      await onSubmit(form);
+      await onSubmit({
+        contactName: form.contactName.trim(),
+        parentName: form.parentName?.trim() || undefined,
+        email: form.email?.trim() || undefined,
+        phone: form.phone?.trim() || undefined,
+        parentPhone: form.parentPhone?.trim() || undefined,
+        source: form.source?.trim() || undefined,
+        campaign: form.campaign?.trim() || undefined,
+        countryInterest: form.countryInterest?.trim() || undefined,
+        majorInterest: form.majorInterest?.trim() || undefined,
+        intake: form.intake?.trim() || undefined,
+        serviceInterest: form.serviceInterest?.trim() || undefined,
+      });
       toast({ title: lead ? "Đã cập nhật lead." : "Đã tạo lead.", variant: "success" });
       onClose();
     } catch (err) {

@@ -40,7 +40,13 @@ export function StudentContactFormDialog({
     if (!form.name.trim()) return;
     setError(null);
     try {
-      await onSubmit(form);
+      await onSubmit({
+        type: form.type,
+        name: form.name.trim(),
+        relationship: form.relationship?.trim() || undefined,
+        phone: form.phone?.trim() || undefined,
+        email: form.email?.trim() || undefined,
+      });
       toast({ title: "Đã thêm liên hệ.", variant: "success" });
       onClose();
     } catch (err) {
