@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import { PARTNER_DOCUMENT_TYPES, type CreatePartnerDocumentInput, type PartnerDocument, type PartnerDocumentType, type UpdatePartnerDocumentInput } from "@/lib/partner-documents/types";
 
 const TYPE_LABEL: Record<PartnerDocumentType, string> = {
@@ -25,6 +26,7 @@ export function PartnerDocumentFormDialog({
   open,
   onClose,
   document,
+  partnerId,
   onSubmit,
   submitting,
 }: {
@@ -32,6 +34,8 @@ export function PartnerDocumentFormDialog({
   onClose: () => void;
   /** Present = edit (DRAFT only); absent = create. */
   document?: PartnerDocument;
+  /** Owner for the document uploaded inline through this dialog. */
+  partnerId: string;
   onSubmit: (input: CreatePartnerDocumentInput | UpdatePartnerDocumentInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -63,7 +67,7 @@ export function PartnerDocumentFormDialog({
         } satisfies UpdatePartnerDocumentInput);
       } else {
         if (!documentId.trim()) {
-          setError("Vui lòng nhập Document ID (tài liệu phải đã được tải lên trước).");
+          setError("Vui lòng tải lên tệp tài liệu.");
           return;
         }
         await onSubmit({
@@ -106,13 +110,15 @@ export function PartnerDocumentFormDialog({
             </select>
           </div>
         )}
-        <div>
-          <label htmlFor="partner-document-document-id" className="mb-1 block text-sm font-medium">
-            Document ID {!isEdit ? "*" : ""}
-          </label>
-          <Input id="partner-document-document-id" value={documentId} onChange={(e) => setDocumentId(e.target.value)} placeholder="UUID tài liệu đã tải lên" required={!isEdit} />
-          <p className="mt-1 text-xs text-muted-foreground">Tài liệu phải đã được tải lên qua hệ thống tài liệu hiện có.</p>
-        </div>
+        <DocumentAttachmentField
+          label="Tệp tài liệu"
+          documentId={documentId}
+          onChange={setDocumentId}
+          ownerEntity="Partner"
+          ownerId={partnerId}
+          documentType={type}
+          required={!isEdit}
+        />
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label htmlFor="partner-document-effective" className="mb-1 block text-sm font-medium">

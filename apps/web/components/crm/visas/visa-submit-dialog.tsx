@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { SubmitVisaInput } from "@/lib/visas/types";
 
 /// READY → SUBMITTED. The backend re-verifies the mandatory-checklist gate server-side
@@ -15,11 +16,14 @@ import type { SubmitVisaInput } from "@/lib/visas/types";
 export function VisaSubmitDialog({
   open,
   onClose,
+  studentId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  studentId: string;
   onSubmit: (input: SubmitVisaInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -56,12 +60,13 @@ export function VisaSubmitDialog({
           </label>
           <Input id="visa-submission-reference" value={submissionReference} onChange={(e) => setSubmissionReference(e.target.value)} />
         </div>
-        <div>
-          <label htmlFor="visa-submission-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="visa-submission-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Student"
+          ownerId={studentId}
+          documentType="VISA_SUBMISSION_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

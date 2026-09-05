@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { CreateOfferInput } from "@/lib/offers/types";
 
 /// Record a new Offer (F05 instruction §18/§20) — the backend requires the parent
@@ -18,11 +19,14 @@ import type { CreateOfferInput } from "@/lib/offers/types";
 export function OfferCreateDialog({
   open,
   onClose,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreateOfferInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -124,12 +128,14 @@ export function OfferCreateDialog({
             />
           </div>
         ) : null}
-        <div>
-          <label htmlFor="offer-evidence-document" className="mb-1 block text-sm font-medium">
-            Document ID thư mời
-          </label>
-          <Input id="offer-evidence-document" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          label="Tệp thư mời"
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="OFFER_LETTER"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

@@ -3,23 +3,26 @@
 import { useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 
-/// `signedDocumentId` references an already-uploaded signed artifact — manual ID entry, same
-/// documented limitation as every other picker in this phase (no document upload/browse UI
-/// exists yet, F07 scope). Irreversible: SENT→SIGNED requires the Student already have
-/// exactly one active Case (`409 NO_ACTIVE_CASE_FOR_STUDENT`/`CASE_ALREADY_LINKED`).
+/// `signedDocumentId` is uploaded inline via `DocumentAttachmentField` — no more manual UUID
+/// entry (F07's existing upload primitive, same as `EvidenceUploadDialog`). Irreversible:
+/// SENT→SIGNED requires the Student already have exactly one active Case (`409
+/// NO_ACTIVE_CASE_FOR_STUDENT`/`CASE_ALREADY_LINKED`).
 export function ContractSignDialog({
   open,
   onClose,
+  studentId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Owner for the signed document uploaded inline through this dialog. */
+  studentId: string;
   onSubmit: (signedDocumentId: string) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -51,18 +54,15 @@ export function ContractSignDialog({
         <p className="text-sm text-danger">
           Thao tác này không thể hoàn tác — hợp đồng sẽ trở thành bất biến (chỉ có thể sửa qua Amendment sau khi ký).
         </p>
-        <div>
-          <label htmlFor="contract-signed-document-id" className="mb-1 block text-sm font-medium">
-            Document ID bản đã ký *
-          </label>
-          <Input
-            id="contract-signed-document-id"
-            value={signedDocumentId}
-            onChange={(e) => setSignedDocumentId(e.target.value)}
-            placeholder="UUID tài liệu đã ký"
-            required
-          />
-        </div>
+        <DocumentAttachmentField
+          label="Bản hợp đồng đã ký"
+          documentId={signedDocumentId}
+          onChange={setSignedDocumentId}
+          ownerEntity="Student"
+          ownerId={studentId}
+          documentType="CONTRACT_SIGNED"
+          required
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

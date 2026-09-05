@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { CreateTestRecordInput, TestRecord, UpdateTestRecordInput } from "@/lib/profile-evidence/types";
 
 /// One row per attempt — a new attempt is a new row, never overwritten (F04 instruction §24).
@@ -16,12 +17,15 @@ export function TestRecordDialog({
   open,
   onClose,
   record,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
   record?: TestRecord;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreateTestRecordInput | UpdateTestRecordInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -111,12 +115,13 @@ export function TestRecordDialog({
           </label>
           <Input id="test-target" type="number" step="0.01" value={target} onChange={(e) => setTarget(e.target.value)} />
         </div>
-        <div>
-          <label htmlFor="test-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="test-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="TEST_RECORD_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

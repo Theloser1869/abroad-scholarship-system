@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { Activity, CreateActivityInput, UpdateActivityInput } from "@/lib/profile-evidence/types";
 
 /// `category` is free text — no hardcoded/fixed category list, no master-data lookup
@@ -16,12 +17,15 @@ export function ActivityDialog({
   open,
   onClose,
   record,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
   record?: Activity;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreateActivityInput | UpdateActivityInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -137,12 +141,13 @@ export function ActivityDialog({
             <Input id="activity-verifier" value={verifierName} onChange={(e) => setVerifierName(e.target.value)} />
           </div>
         </div>
-        <div>
-          <label htmlFor="activity-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="activity-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="ACTIVITY_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

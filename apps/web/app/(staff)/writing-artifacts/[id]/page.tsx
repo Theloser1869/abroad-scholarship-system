@@ -65,7 +65,7 @@ export function WritingArtifactDetailContent({ id }: { id: string }) {
         )}
       </Card>
 
-      <WritingVersionDialog open={versionOpen} onClose={() => setVersionOpen(false)} onSubmit={(input) => createVersion.mutateAsync(input)} submitting={createVersion.isPending} />
+      <WritingVersionDialog open={versionOpen} onClose={() => setVersionOpen(false)} caseId={artifact?.caseId ?? ""} onSubmit={(input) => createVersion.mutateAsync(input)} submitting={createVersion.isPending} />
       <WritingStatusDialog
         open={statusOpen}
         onClose={() => setStatusOpen(false)}

@@ -114,12 +114,14 @@ export function EnrollmentDetailContent({ id }: { id: string }) {
         open={editOpen}
         onClose={() => setEditOpen(false)}
         isEdit
+        caseId={enrollment?.caseId ?? ""}
         onSubmit={(input) => updateEnrollment.mutateAsync(input as UpdateEnrollmentInput)}
         submitting={updateEnrollment.isPending}
       />
       <EnrollmentConfirmDialog
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
+        caseId={enrollment?.caseId ?? ""}
         onSubmit={(input) => confirmEnrollment.mutateAsync(input)}
         submitting={confirmEnrollment.isPending}
       />

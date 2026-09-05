@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import { UserPicker } from "@/components/crm/user-picker";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import { CHECKLIST_ITEM_STATUS_LABEL } from "@/components/crm/status-badge";
 import { CHECKLIST_ITEM_STATUSES, type ChecklistItemStatus } from "@/lib/visas/types";
 import type { CreatePreDepartureItemInput, PreDepartureItem, UpdatePreDepartureItemInput } from "@/lib/pre-departure/types";
@@ -23,6 +24,7 @@ export function PreDepartureItemDialog({
   open,
   onClose,
   item,
+  caseId,
   onSubmit,
   submitting,
 }: {
@@ -30,6 +32,8 @@ export function PreDepartureItemDialog({
   onClose: () => void;
   /** Present = edit; absent = create. */
   item?: PreDepartureItem;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreatePreDepartureItemInput | UpdatePreDepartureItemInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -127,12 +131,13 @@ export function PreDepartureItemDialog({
             </select>
           </div>
         ) : null}
-        <div>
-          <label htmlFor="pre-departure-item-document" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="pre-departure-item-document" value={documentId} onChange={(e) => setDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={documentId}
+          onChange={setDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="PRE_DEPARTURE_EVIDENCE"
+        />
         <div>
           <label htmlFor="pre-departure-item-notes" className="mb-1 block text-sm font-medium">
             Ghi chú

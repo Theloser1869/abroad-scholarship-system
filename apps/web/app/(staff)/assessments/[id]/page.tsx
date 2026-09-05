@@ -146,6 +146,7 @@ export function AssessmentDetailContent({ id }: { id: string }) {
         open={criterionOpen}
         onClose={() => setCriterionOpen(false)}
         criterion={editingCriterion}
+        caseId={assessment?.caseId ?? ""}
         onSubmit={(input) => upsertCriterion.mutateAsync(input)}
         submitting={upsertCriterion.isPending}
       />

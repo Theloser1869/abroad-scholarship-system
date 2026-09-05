@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import { UserPicker } from "@/components/crm/user-picker";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import { CHECKLIST_ITEM_STATUS_LABEL } from "@/components/crm/status-badge";
 import { CHECKLIST_ITEM_STATUSES, type ChecklistItemStatus, type CreateVisaChecklistItemInput, type UpdateVisaChecklistItemInput, type VisaChecklistItem } from "@/lib/visas/types";
 
@@ -19,6 +20,7 @@ export function VisaChecklistItemDialog({
   open,
   onClose,
   item,
+  studentId,
   onSubmit,
   submitting,
 }: {
@@ -26,6 +28,8 @@ export function VisaChecklistItemDialog({
   onClose: () => void;
   /** Present = edit; absent = create. */
   item?: VisaChecklistItem;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  studentId: string;
   onSubmit: (input: CreateVisaChecklistItemInput | UpdateVisaChecklistItemInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -121,12 +125,13 @@ export function VisaChecklistItemDialog({
             </select>
           </div>
         ) : null}
-        <div>
-          <label htmlFor="visa-checklist-item-document" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="visa-checklist-item-document" value={documentId} onChange={(e) => setDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={documentId}
+          onChange={setDocumentId}
+          ownerEntity="Student"
+          ownerId={studentId}
+          documentType="VISA_CHECKLIST_EVIDENCE"
+        />
         <div>
           <label htmlFor="visa-checklist-item-notes" className="mb-1 block text-sm font-medium">
             Ghi chú

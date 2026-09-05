@@ -242,7 +242,7 @@ export function ScholarshipApplicationDetailContent({ id }: { id: string }) {
         onSubmit={(status) => updateStatus.mutateAsync(status)}
         submitting={updateStatus.isPending}
       />
-      <AwardDialog open={awardOpen} onClose={() => setAwardOpen(false)} onSubmit={(input) => awardScholarship.mutateAsync(input)} submitting={awardScholarship.isPending} />
+      <AwardDialog open={awardOpen} onClose={() => setAwardOpen(false)} caseId={scholarshipApplication?.caseId ?? ""} onSubmit={(input) => awardScholarship.mutateAsync(input)} submitting={awardScholarship.isPending} />
       <ConfirmDialog
         open={rejectOpen}
         onClose={() => setRejectOpen(false)}

@@ -214,7 +214,7 @@ export function VisaDetailContent({ id }: { id: string }) {
         onSubmit={(status) => updateStatus.mutateAsync(status)}
         submitting={updateStatus.isPending}
       />
-      <VisaSubmitDialog open={submitOpen} onClose={() => setSubmitOpen(false)} onSubmit={(input) => submitVisa.mutateAsync(input)} submitting={submitVisa.isPending} />
+      <VisaSubmitDialog open={submitOpen} onClose={() => setSubmitOpen(false)} studentId={visa.studentId} onSubmit={(input) => submitVisa.mutateAsync(input)} submitting={submitVisa.isPending} />
       <VisaAppointmentDialog
         open={appointmentOpen}
         onClose={() => setAppointmentOpen(false)}
@@ -222,10 +222,11 @@ export function VisaDetailContent({ id }: { id: string }) {
         submitting={scheduleAppointment.isPending}
       />
       <VisaInterviewDialog open={interviewOpen} onClose={() => setInterviewOpen(false)} onSubmit={(input) => recordInterview.mutateAsync(input)} submitting={recordInterview.isPending} />
-      <VisaResultDialog open={resultOpen} onClose={() => setResultOpen(false)} onSubmit={(input) => recordResult.mutateAsync(input)} submitting={recordResult.isPending} />
+      <VisaResultDialog open={resultOpen} onClose={() => setResultOpen(false)} studentId={visa.studentId} onSubmit={(input) => recordResult.mutateAsync(input)} submitting={recordResult.isPending} />
       <VisaChecklistItemDialog
         open={checklistCreateOpen}
         onClose={() => setChecklistCreateOpen(false)}
+        studentId={visa.studentId}
         onSubmit={(input) => createChecklistItem.mutateAsync(input as Parameters<typeof createChecklistItem.mutateAsync>[0])}
         submitting={createChecklistItem.isPending}
       />

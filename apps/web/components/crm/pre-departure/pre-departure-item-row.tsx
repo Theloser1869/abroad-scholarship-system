@@ -40,6 +40,7 @@ export function PreDepartureItemRow({ item, caseId, canEdit }: { item: PreDepart
         open={editOpen}
         onClose={() => setEditOpen(false)}
         item={item}
+        caseId={caseId}
         onSubmit={(input) => updateItem.mutateAsync(input as Parameters<typeof updateItem.mutateAsync>[0])}
         submitting={updateItem.isPending}
       />

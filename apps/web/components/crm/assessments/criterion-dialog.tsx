@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { AssessmentCriterion, UpsertCriterionInput } from "@/lib/assessments/types";
 
 /// Upsert by `area` (F04 instruction §16/§18) — `gap` is never collected here, it is always
@@ -16,6 +17,7 @@ export function CriterionDialog({
   open,
   onClose,
   criterion,
+  caseId,
   onSubmit,
   submitting,
 }: {
@@ -23,6 +25,8 @@ export function CriterionDialog({
   onClose: () => void;
   /** Present = editing an existing area; absent = adding a new one. */
   criterion?: AssessmentCriterion;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: UpsertCriterionInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -112,12 +116,13 @@ export function CriterionDialog({
             rows={3}
           />
         </div>
-        <div>
-          <label htmlFor="criterion-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="criterion-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="ASSESSMENT_CRITERION_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

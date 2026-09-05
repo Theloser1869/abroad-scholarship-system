@@ -73,6 +73,7 @@ export function ApplicationOffersContent({ applicationId }: { applicationId: str
       <OfferCreateDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        caseId={application?.caseId ?? ""}
         onSubmit={(input) => createOffer.mutateAsync(input)}
         submitting={createOffer.isPending}
       />

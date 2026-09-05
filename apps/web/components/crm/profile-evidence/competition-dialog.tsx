@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { Competition, CreateCompetitionInput, UpdateCompetitionInput } from "@/lib/profile-evidence/types";
 
 /// Each participation is its own row (F04 instruction §25) — never folded into Activity.
@@ -14,12 +15,15 @@ export function CompetitionDialog({
   open,
   onClose,
   record,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
   record?: Competition;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreateCompetitionInput | UpdateCompetitionInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -108,12 +112,13 @@ export function CompetitionDialog({
           </label>
           <Input id="competition-result" value={result} onChange={(e) => setResult(e.target.value)} />
         </div>
-        <div>
-          <label htmlFor="competition-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="competition-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="COMPETITION_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

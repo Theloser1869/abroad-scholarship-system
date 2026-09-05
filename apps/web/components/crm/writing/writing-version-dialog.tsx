@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { CreateWritingVersionInput } from "@/lib/writing/types";
 
 /// Always creates a NEW version row — there is no "edit this version" endpoint, so a Final/
@@ -17,11 +18,14 @@ import type { CreateWritingVersionInput } from "@/lib/writing/types";
 export function WritingVersionDialog({
   open,
   onClose,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreateWritingVersionInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -64,12 +68,14 @@ export function WritingVersionDialog({
             rows={6}
           />
         </div>
-        <div>
-          <label htmlFor="version-document" className="mb-1 block text-sm font-medium">
-            Document ID (tệp đính kèm thay thế)
-          </label>
-          <Input id="version-document" value={documentId} onChange={(e) => setDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          label="Tệp đính kèm thay thế"
+          documentId={documentId}
+          onChange={setDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="WRITING_VERSION_ATTACHMENT"
+        />
         <div>
           <label htmlFor="version-change-summary" className="mb-1 block text-sm font-medium">
             Tóm tắt thay đổi

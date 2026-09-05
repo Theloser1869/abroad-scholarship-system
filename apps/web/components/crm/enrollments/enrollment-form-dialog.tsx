@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { CreateEnrollmentInput, UpdateEnrollmentInput } from "@/lib/enrollments/types";
 
 /// Create Enrollment (F06 instruction §14) — `offerId` is a manual UUID input (required):
@@ -21,12 +22,15 @@ export function EnrollmentFormDialog({
   open,
   onClose,
   isEdit = false,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
   isEdit?: boolean;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreateEnrollmentInput | UpdateEnrollmentInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -77,12 +81,13 @@ export function EnrollmentFormDialog({
           </label>
           <Input id="enrollment-start-date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         </div>
-        <div>
-          <label htmlFor="enrollment-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="enrollment-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="ENROLLMENT_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

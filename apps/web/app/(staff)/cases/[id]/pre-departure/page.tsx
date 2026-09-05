@@ -63,6 +63,7 @@ export function CasePreDepartureContent({ caseId }: { caseId: string }) {
       <PreDepartureItemDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        caseId={caseId}
         onSubmit={(input) => createItem.mutateAsync(input as Parameters<typeof createItem.mutateAsync>[0])}
         submitting={createItem.isPending}
       />

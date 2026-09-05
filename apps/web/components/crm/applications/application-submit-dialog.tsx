@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { SubmitApplicationInput } from "@/lib/applications/types";
 
 /// READY_FOR_REVIEW → SUBMITTED. The backend is the sole checklist-completeness gate
@@ -15,11 +16,14 @@ import type { SubmitApplicationInput } from "@/lib/applications/types";
 export function ApplicationSubmitDialog({
   open,
   onClose,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: SubmitApplicationInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -68,12 +72,14 @@ export function ApplicationSubmitDialog({
           </label>
           <Input id="application-submission-reference" value={submissionReference} onChange={(e) => setSubmissionReference(e.target.value)} />
         </div>
-        <div>
-          <label htmlFor="application-evidence-document" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng nộp hồ sơ
-          </label>
-          <Input id="application-evidence-document" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          label="Tài liệu minh chứng nộp hồ sơ"
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="APPLICATION_SUBMISSION_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

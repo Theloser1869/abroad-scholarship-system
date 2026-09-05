@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useUpdateVisaChecklistItem } from "@/lib/visas/hooks";
+import { useUpdateVisaChecklistItem, useVisa } from "@/lib/visas/hooks";
 import { VisaChecklistItemDialog } from "@/components/crm/visas/visa-checklist-item-dialog";
 import { EvidenceDocumentLink } from "@/components/crm/evidence-document-link";
 import { StatusBadge, CHECKLIST_ITEM_STATUS_VARIANT, CHECKLIST_ITEM_STATUS_LABEL } from "@/components/crm/status-badge";
@@ -13,6 +13,7 @@ import type { VisaChecklistItem } from "@/lib/visas/types";
 /// established for `ChecklistItemRow`).
 export function VisaChecklistItemRow({ item, visaId, canEdit }: { item: VisaChecklistItem; visaId: string; canEdit: boolean }) {
   const updateItem = useUpdateVisaChecklistItem(item.id, visaId);
+  const { data: visa } = useVisa(visaId);
   const [editOpen, setEditOpen] = useState(false);
 
   return (
@@ -38,6 +39,7 @@ export function VisaChecklistItemRow({ item, visaId, canEdit }: { item: VisaChec
         open={editOpen}
         onClose={() => setEditOpen(false)}
         item={item}
+        studentId={visa?.studentId ?? ""}
         onSubmit={(input) => updateItem.mutateAsync(input as Parameters<typeof updateItem.mutateAsync>[0])}
         submitting={updateItem.isPending}
       />

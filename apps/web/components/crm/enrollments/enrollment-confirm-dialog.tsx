@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { ConfirmEnrollmentInput } from "@/lib/enrollments/types";
 
 /// Confirm Enrollment (F06 instruction §15) — `409 CONFIRMED_ENROLLMENT_EXISTS` (at-most-one-
@@ -14,11 +15,14 @@ import type { ConfirmEnrollmentInput } from "@/lib/enrollments/types";
 export function EnrollmentConfirmDialog({
   open,
   onClose,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: ConfirmEnrollmentInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -57,12 +61,13 @@ export function EnrollmentConfirmDialog({
           </label>
           <Input id="enrollment-confirmation-date" type="date" value={confirmationDate} onChange={(e) => setConfirmationDate(e.target.value)} />
         </div>
-        <div>
-          <label htmlFor="enrollment-confirm-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="enrollment-confirm-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="ENROLLMENT_CONFIRMATION_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}

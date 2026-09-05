@@ -201,6 +201,7 @@ export function ApplicationDetailContent({ id }: { id: string }) {
       <ApplicationSubmitDialog
         open={submitOpen}
         onClose={() => setSubmitOpen(false)}
+        caseId={application.caseId}
         onSubmit={(input) => submitApplication.mutateAsync(input)}
         submitting={submitApplication.isPending}
       />
@@ -214,6 +215,7 @@ export function ApplicationDetailContent({ id }: { id: string }) {
       <ChecklistItemDialog
         open={checklistCreateOpen}
         onClose={() => setChecklistCreateOpen(false)}
+        caseId={application.caseId}
         onSubmit={(input) => createChecklistItem.mutateAsync(input as Parameters<typeof createChecklistItem.mutateAsync>[0])}
         submitting={createChecklistItem.isPending}
       />

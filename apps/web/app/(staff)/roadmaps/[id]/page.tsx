@@ -168,6 +168,7 @@ export function RoadmapDetailContent({ id }: { id: string }) {
         open={formEditTarget !== null}
         onClose={() => setFormEditTarget(null)}
         milestone={formEditTarget && formEditTarget !== "new" ? formEditTarget : undefined}
+        caseId={caseId}
         onSubmit={(input) =>
           formEditTarget && formEditTarget !== "new"
             ? updateMilestone.mutateAsync(input as UpdateMilestoneInput)

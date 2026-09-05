@@ -75,6 +75,7 @@ export function CaseEnrollmentsContent({ caseId }: { caseId: string }) {
       <EnrollmentFormDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        caseId={caseId}
         onSubmit={(input) => createEnrollment.mutateAsync(input as CreateEnrollmentInput)}
         submitting={createEnrollment.isPending}
       />

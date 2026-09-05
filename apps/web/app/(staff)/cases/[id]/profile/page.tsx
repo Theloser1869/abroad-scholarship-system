@@ -111,6 +111,7 @@ function AcademicTab({ caseId }: { caseId: string }) {
         open={editing !== null}
         onClose={() => setEditing(null)}
         record={editTarget}
+        caseId={caseId}
         onSubmit={(input) => (editTarget ? update.mutateAsync(input) : create.mutateAsync(input as Parameters<typeof create.mutateAsync>[0]))}
         submitting={update.isPending || create.isPending}
       />
@@ -199,6 +200,7 @@ function TestTab({ caseId }: { caseId: string }) {
         open={editing !== null}
         onClose={() => setEditing(null)}
         record={editTarget}
+        caseId={caseId}
         onSubmit={(input) => (editTarget ? update.mutateAsync(input) : create.mutateAsync(input as Parameters<typeof create.mutateAsync>[0]))}
         submitting={update.isPending || create.isPending || verify.isPending}
       />
@@ -287,6 +289,7 @@ function CompetitionTab({ caseId }: { caseId: string }) {
         open={editing !== null}
         onClose={() => setEditing(null)}
         record={editTarget}
+        caseId={caseId}
         onSubmit={(input) => (editTarget ? update.mutateAsync(input) : create.mutateAsync(input as Parameters<typeof create.mutateAsync>[0]))}
         submitting={update.isPending || create.isPending}
       />
@@ -340,6 +343,7 @@ function ResearchTab({ caseId }: { caseId: string }) {
         open={editing !== null}
         onClose={() => setEditing(null)}
         record={editTarget}
+        caseId={caseId}
         onSubmit={(input) => (editTarget ? update.mutateAsync(input) : create.mutateAsync(input as Parameters<typeof create.mutateAsync>[0]))}
         submitting={update.isPending || create.isPending}
       />
@@ -376,6 +380,7 @@ function ActivityTab({ caseId }: { caseId: string }) {
         open={editing !== null}
         onClose={() => setEditing(null)}
         record={editTarget}
+        caseId={caseId}
         onSubmit={(input) => (editTarget ? update.mutateAsync(input) : create.mutateAsync(input as Parameters<typeof create.mutateAsync>[0]))}
         submitting={update.isPending || create.isPending || verify.isPending}
       />

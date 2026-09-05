@@ -8,12 +8,14 @@ import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
 import { UserPicker } from "@/components/crm/user-picker";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { CreateMilestoneInput, RoadmapMilestone, UpdateMilestoneInput } from "@/lib/roadmaps/types";
 
 export function MilestoneFormDialog({
   open,
   onClose,
   milestone,
+  caseId,
   onSubmit,
   submitting,
 }: {
@@ -21,6 +23,8 @@ export function MilestoneFormDialog({
   onClose: () => void;
   /** Present = edit; absent = create. */
   milestone?: RoadmapMilestone;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreateMilestoneInput | UpdateMilestoneInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -115,12 +119,13 @@ export function MilestoneFormDialog({
           </div>
         </div>
         {isEdit ? (
-          <div>
-            <label htmlFor="milestone-evidence" className="mb-1 block text-sm font-medium">
-              Document ID minh chứng
-            </label>
-            <Input id="milestone-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-          </div>
+          <DocumentAttachmentField
+            documentId={evidenceDocumentId}
+            onChange={setEvidenceDocumentId}
+            ownerEntity="Case"
+            ownerId={caseId}
+            documentType="ROADMAP_MILESTONE_EVIDENCE"
+          />
         ) : null}
         {error ? (
           <p role="alert" className="text-sm text-danger">

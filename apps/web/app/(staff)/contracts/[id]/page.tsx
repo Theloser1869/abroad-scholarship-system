@@ -241,7 +241,7 @@ export function ContractDetailContent({ id }: { id: string }) {
         submitting={rejectContract.isPending}
       />
       <ContractSendDialog open={sendOpen} onClose={() => setSendOpen(false)} onSubmit={() => sendContract.mutateAsync()} submitting={sendContract.isPending} />
-      <ContractSignDialog open={signOpen} onClose={() => setSignOpen(false)} onSubmit={(docId) => signContract.mutateAsync(docId)} submitting={signContract.isPending} />
+      <ContractSignDialog open={signOpen} onClose={() => setSignOpen(false)} studentId={contract.studentId} onSubmit={(docId) => signContract.mutateAsync(docId)} submitting={signContract.isPending} />
       <ContractStatusDialog
         open={statusOpen}
         onClose={() => setStatusOpen(false)}

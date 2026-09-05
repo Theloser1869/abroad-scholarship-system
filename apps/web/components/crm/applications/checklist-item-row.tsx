@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useUpdateChecklistItem } from "@/lib/applications/hooks";
+import { useApplication, useUpdateChecklistItem } from "@/lib/applications/hooks";
 import { ChecklistItemDialog } from "@/components/crm/applications/checklist-item-dialog";
 import { EvidenceDocumentLink } from "@/components/crm/evidence-document-link";
 import { StatusBadge, CHECKLIST_ITEM_STATUS_VARIANT, CHECKLIST_ITEM_STATUS_LABEL } from "@/components/crm/status-badge";
@@ -14,6 +14,7 @@ import type { ApplicationChecklistItem } from "@/lib/applications/types";
 /// bug).
 export function ChecklistItemRow({ item, applicationId, canEdit }: { item: ApplicationChecklistItem; applicationId: string; canEdit: boolean }) {
   const updateItem = useUpdateChecklistItem(item.id, applicationId);
+  const { data: application } = useApplication(applicationId);
   const [editOpen, setEditOpen] = useState(false);
 
   return (
@@ -39,6 +40,7 @@ export function ChecklistItemRow({ item, applicationId, canEdit }: { item: Appli
         open={editOpen}
         onClose={() => setEditOpen(false)}
         item={item}
+        caseId={application?.caseId ?? ""}
         onSubmit={(input) => updateItem.mutateAsync(input as Parameters<typeof updateItem.mutateAsync>[0])}
         submitting={updateItem.isPending}
       />

@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { Textarea } from "@/components/ui/textarea";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { RecordVisaResultInput, VisaResult } from "@/lib/visas/types";
 
 /// {SUBMITTED, APPOINTMENT, INTERVIEW} → {GRANTED, REFUSED}, terminal (F06 instruction §11).
@@ -15,11 +16,14 @@ import type { RecordVisaResultInput, VisaResult } from "@/lib/visas/types";
 export function VisaResultDialog({
   open,
   onClose,
+  studentId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  studentId: string;
   onSubmit: (input: RecordVisaResultInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -73,12 +77,14 @@ export function VisaResultDialog({
           </label>
           <Input id="visa-result-date" type="date" value={resultDate} onChange={(e) => setResultDate(e.target.value)} />
         </div>
-        <div>
-          <label htmlFor="visa-result-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng kết quả
-          </label>
-          <Input id="visa-result-evidence" value={resultEvidenceDocumentId} onChange={(e) => setResultEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          label="Tài liệu minh chứng kết quả"
+          documentId={resultEvidenceDocumentId}
+          onChange={setResultEvidenceDocumentId}
+          ownerEntity="Student"
+          ownerId={studentId}
+          documentType="VISA_RESULT_EVIDENCE"
+        />
         <div>
           <label htmlFor="visa-result-reason" className="mb-1 block text-sm font-medium">
             Lý do {result === "REFUSED" ? "từ chối" : "(nếu có)"}

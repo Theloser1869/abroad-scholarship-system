@@ -274,6 +274,7 @@ export function PartnerDetailContent({ id }: { id: string }) {
       <PartnerDocumentFormDialog
         open={createDocumentOpen}
         onClose={() => setCreateDocumentOpen(false)}
+        partnerId={id}
         onSubmit={(input) => createDocument.mutateAsync(input as Parameters<typeof createDocument.mutateAsync>[0])}
         submitting={createDocument.isPending}
       />

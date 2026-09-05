@@ -85,6 +85,7 @@ export function PartnerDocumentRow({ document, canEdit }: { document: PartnerDoc
         open={editOpen}
         onClose={() => setEditOpen(false)}
         document={document}
+        partnerId={document.partnerId}
         onSubmit={(input) => updateDocument.mutateAsync(input)}
         submitting={updateDocument.isPending}
       />

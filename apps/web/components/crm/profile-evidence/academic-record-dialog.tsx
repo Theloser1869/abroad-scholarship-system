@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { crmErrorMessage } from "@/lib/api/error-messages";
 import { useResetOnOpen } from "@/lib/utils/use-reset-on-open";
+import { DocumentAttachmentField } from "@/components/crm/documents/document-attachment-field";
 import type { AcademicRecord, CreateAcademicRecordInput, UpdateAcademicRecordInput } from "@/lib/profile-evidence/types";
 import { SchoolPicker } from "./school-picker";
 
@@ -16,12 +17,15 @@ export function AcademicRecordDialog({
   open,
   onClose,
   record,
+  caseId,
   onSubmit,
   submitting,
 }: {
   open: boolean;
   onClose: () => void;
   record?: AcademicRecord;
+  /** Owner for any evidence document uploaded inline through this dialog. */
+  caseId: string;
   onSubmit: (input: CreateAcademicRecordInput | UpdateAcademicRecordInput) => Promise<unknown>;
   submitting: boolean;
 }) {
@@ -107,12 +111,13 @@ export function AcademicRecordDialog({
           </div>
         </div>
         <p className="text-xs text-muted-foreground">Lớp cùng với hồ sơ học sinh cần điền đầy đủ trước khi duyệt đánh giá (Assessment). GPA là tùy chọn.</p>
-        <div>
-          <label htmlFor="academic-evidence" className="mb-1 block text-sm font-medium">
-            Document ID minh chứng
-          </label>
-          <Input id="academic-evidence" value={evidenceDocumentId} onChange={(e) => setEvidenceDocumentId(e.target.value)} placeholder="UUID tài liệu (tùy chọn)" />
-        </div>
+        <DocumentAttachmentField
+          documentId={evidenceDocumentId}
+          onChange={setEvidenceDocumentId}
+          ownerEntity="Case"
+          ownerId={caseId}
+          documentType="ACADEMIC_RECORD_EVIDENCE"
+        />
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}
